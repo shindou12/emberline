@@ -193,9 +193,8 @@
     }
     /* tiles that will cool at the end of this turn if no more are added */
     coolPreview(extra) {
-      const S0 = L.stats(this.run);
       const n = this.v.footprints.trail.length + (extra || 0);
-      this.v.footprints.cool = Math.max(0, n - S0.trail);
+      this.v.footprints.cool = L.coolCount(this.run, n);
     }
     clearTargets() {
       for (const k in this.enemyViews) {
@@ -914,14 +913,25 @@
         this.coolPreview();
         v.route.pts = [];
         this.hint(this.first ? "主人公から指でなぞってルートを描こう" : `ルートを描いて切り抜けろ — 残り${B.enemies.length}体`);
-        // stuck? (no legal first step)
-        const blocked = L.blockedSet(B, [B.hero]);
-        const any = L.DIRS8.some(([dx, dy]) => !L.stepError(B, blocked, 1, B.hero, { x: B.hero.x + dx, y: B.hero.y + dy }));
-        if (!any) {
-          this.busy = true;
-          this.hint("動けない！ 足跡に囲まれた…");
-          S.play("invalid");
-          setTimeout(() => { this.busy = false; B.lastT = { moves: 0 }; this.go("Battle.EnemyPhase"); }, 1100);
+        // boxed in by embers? the oldest embers crumble until a way opens
+        if (!L.canMove(B)) {
+          const cooled = L.unstick(B);
+          if (cooled.length) {
+            const v2 = this.v;
+            cooled.forEach((t, k) => v2.footprints.ashes.push({ x: t.x, y: t.y, t: -k * 60 }));
+            v2.footprints.trail = B.trail.map((t) => ({ x: t.x, y: t.y }));
+            this.path = B.trail.map((t) => ({ x: t.x, y: t.y }));
+            this.coolPreview();
+            S.play("cool");
+            this.toast("足跡が崩れた", "囲まれたので、古い足跡から冷めて道が開いた");
+          }
+          if (!L.canMove(B)) {
+            // truly walled in by rocks: pass the turn
+            this.busy = true;
+            this.hint("動けない！");
+            S.play("invalid");
+            setTimeout(() => { this.busy = false; B.lastT = { moves: 0 }; this.go("Battle.EnemyPhase"); }, 1100);
+          }
         }
       },
       exit() { EL.tween(this.v.board, { heroHint: 0 }, 150, { clock: "ui" }); },

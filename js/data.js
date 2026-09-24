@@ -5,6 +5,7 @@
   const BAL = {
     GW: 7, GH: 8, // board size (tiles)
     trailBase: 5, trailPer: 3, // ember trail length = base + per * companions
+    coolMin: 2, // embers always cool at least this many tiles per turn
     deepTurn: 4, // from this turn on, the night deepens: every enemy presses +1
     healAfterBattle: 4,
     restHealPct: 0.35,

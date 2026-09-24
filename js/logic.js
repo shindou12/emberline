@@ -556,9 +556,9 @@
       if (!B.enemies.length) { push({ type: "victory" }); return events; }
     }
     // 2. old embers cool down
-    const L = S.trail;
-    if (B.trail.length > L) {
-      const cooled = B.trail.splice(0, B.trail.length - L);
+    const nCool = coolCount(run, B.trail.length);
+    if (nCool > 0) {
+      const cooled = B.trail.splice(0, nCool);
       push({ type: "cool", tiles: cooled });
     }
     // 3. the night presses in: each surviving enemy hurts the hero
@@ -689,6 +689,20 @@
     }
     return out;
   }
+  /* how many of the oldest trail tiles cool at turn end (hero's tile never) */
+  function coolCount(run, len) {
+    return Math.max(0, Math.max(len - stats(run).trail, Math.min(BAL.coolMin, len - 1)));
+  }
+  function canMove(B) {
+    const blocked = blockedSet(B, [B.hero]);
+    return DIRS8.some(([dx, dy]) => !stepError(B, blocked, 1, B.hero, { x: B.hero.x + dx, y: B.hero.y + dy }));
+  }
+  /* boxed in by embers: the oldest embers crumble until a step opens up */
+  function unstick(B) {
+    const cooled = [];
+    while (B.trail.length > 1 && !canMove(B)) cooled.push(B.trail.shift());
+    return cooled;
+  }
   function enemyPressure(run, B, e) {
     let p = e.pressure - (has(run, "coal") ? 1 : 0);
     if (e.boss && B.phase2) p += 1;
@@ -705,6 +719,6 @@
     CARD, CW, DIRS8, rngFrom, createRun, stats, genMap, nextNodes, genBattle,
     blockedSet, stepError, isWeakEntry, sealedBy, enemyAt, covers, isRock, idx, inB,
     simulate, commitRoute, enemyPhase, genRewards, applyReward, heal, reachable, weakEntries,
-    condReq, condProgress, pressureOf, enemyPressure, has,
+    condReq, condProgress, pressureOf, enemyPressure, has, coolCount, canMove, unstick,
   };
 })(window.EL);

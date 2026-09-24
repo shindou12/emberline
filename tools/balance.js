@@ -52,6 +52,7 @@ function bestRoute(B, run, beam = 70) {
 function battle(run, node, log) {
   const B = L.genBattle(run, node);
   for (let turn = 1; turn <= 20; turn++) {
+    L.unstick(B);
     const route = bestRoute(B, run);
     let res;
     if (route) { res = L.simulate(B, run, route); L.commitRoute(B, run, route, res); }
