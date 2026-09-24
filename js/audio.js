@@ -8,8 +8,26 @@
 
   const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
+  /* iOS suspends (or 'interrupts') the context when the app goes to the
+     background; resume it on return and on the next touch, and play a
+     silent buffer inside the gesture so Safari fully unlocks output. */
+  function wake() {
+    if (!ctx) return;
+    if (ctx.state !== "running") ctx.resume().catch(() => {});
+    try {
+      const b = ctx.createBuffer(1, 1, 22050), s = ctx.createBufferSource();
+      s.buffer = b; s.connect(ctx.destination); s.start(0);
+    } catch (_) {}
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (!ctx) return;
+    if (document.hidden) ctx.suspend().catch(() => {});
+    else wake();
+  });
+  window.addEventListener("pageshow", () => wake());
+  window.addEventListener("focus", () => wake());
   function init() {
-    if (ctx) { if (ctx.state === "suspended") ctx.resume(); return; }
+    if (ctx) { wake(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     ctx = new AC();
@@ -32,6 +50,7 @@
     const curve = new Float32Array(256);
     for (let i = 0; i < 256; i++) { const x = (i / 128) - 1; curve[i] = Math.tanh(x * 3); }
     shaper.curve = curve; shaper.connect(sfxBus);
+    wake();
     if (Seq.pending) Seq.play(Seq.pending);
   }
 
@@ -251,6 +270,8 @@
       const s = this.song;
       if (!s || !ctx) return;
       const sd = 60 / s.bpm / 4;
+      if (ctx.state !== "running") return;
+      if (this.next < ctx.currentTime - 0.25) this.next = ctx.currentTime + 0.05;
       while (this.next < ctx.currentTime + 0.12) {
         this.fire(s, this.step, this.next, sd);
         this.next += sd;

@@ -34,7 +34,7 @@
       if (this.paused) return this.pauseHandle(evt);
       if (this.v.help.visible) return this.helpHandle(evt);
       if (t === "ui.click") {
-        if (d.id === "pause") { if (["Map", "Battle.Idle"].includes(this.state)) this.openPause(); return; }
+        if (d.id === "pause") { if (["Map", "Battle.Idle", "Battle.Planned"].includes(this.state)) this.openPause(); return; }
         if (d.id === "relic") { this.toastRelic(d.relic); return; }
         if (d.id === "comp") { const c = evt.source.comp; if (c) this.toastComp(c); return; }
       }
@@ -336,7 +336,7 @@
       else if (res.outcome === "victory") this.hint("このルートで全滅できる！");
       else if (skills) this.hint("仲間の能力が発動する！");
       else if (kills) this.hint(`撃破で移動+${L.stats(run).refund} — まだ伸ばせる`);
-      else if (this.route.length > 1) this.hint("指を離すと出撃");
+      else if (this.route.length > 1) this.hint("指を離して、出撃ボタンで実行");
       else this.hint("光る側面からまっすぐ突っ込め");
     }
     enemyTile(uid) { const e = this.B.enemies.find((x) => x.uid === uid); return e ? { x: e.x, y: e.y } : { x: 0, y: 0 }; }
@@ -951,12 +951,14 @@
     },
 
     "Battle.Dragging": {
-      enter() {
+      enter(resume) {
         const v = this.v;
         S.play("grab");
+        this.showActions(false);
         v.hero.sq = 0.15; EL.tween(v.hero, { sq: 0 }, 200, { clock: "ui", ease: U.ease.outBack });
         this.setDragUI(true);
-        this.beginRoute();
+        if (resume) { this.route = resume.slice(); this.lastKills = 0; this.lastSkills = 0; this.lastAttacks = 0; this.updatePreview(true); }
+        else this.beginRoute();
       },
       on(evt) {
         if (evt.type !== "route.input") return;
@@ -969,6 +971,30 @@
           this.setDragUI(false);
           this.go("Battle.Idle");
         }
+      },
+    },
+
+    /* the route is drawn but not launched: confirm, redo, or keep drawing from its tip */
+    "Battle.Planned": {
+      enter(route) {
+        this.route = route;
+        this.updatePreview(true);
+        this.showActions(true);
+        this.hint("");
+      },
+      exit() { this.showActions(false); },
+      on(evt) {
+        const d = evt.data;
+        if (evt.type === "ui.click") {
+          if (d.id === "route.go") { S.play("confirm"); this.go("Battle.Executing", this.route); }
+          if (d.id === "route.redo") { S.play("cancel"); this.setDragUI(false); this.go("Battle.Idle"); }
+          return;
+        }
+        if (evt.type !== "route.input" || d.phase !== "begin") return;
+        const B = this.B, tip = this.route[this.route.length - 1];
+        const near = (t) => { const c = tc(t.x, t.y); return Math.hypot(d.px - c.x, d.py - c.y) < V.GEO.T * 0.7; };
+        if (near(tip)) this.go("Battle.Dragging", this.route);
+        else if (near(B.hero)) this.go("Battle.Dragging");
       },
     },
 
@@ -1202,8 +1228,15 @@
       this.go("Battle.Idle");
       return;
     }
-    S.play("confirm");
-    this.go("Battle.Executing", r);
+    S.play("lock");
+    this.go("Battle.Planned", r);
+  };
+  Mediator.prototype.showActions = function (on) {
+    const a = this.v.actionBar;
+    EL.tweens.kill(a);
+    if (on) { a.visible = true; a.alpha = 0; a.y = 8; EL.tween(a, { alpha: 1, y: 0 }, 160, { clock: "ui", ease: U.ease.outBack }); }
+    else a.visible = false;
+    this.v.hint.visible = !on;
   };
   /* tiles behind the hero along the walked path, skipping tiles held by live enemies */
   Mediator.prototype.companionSpots = function (head, settled) {
