@@ -9,13 +9,17 @@
     root.w = EL.W; root.h = EL.H;
 
     const bgLayer = root.add(new EL.Layer("BackgroundLayer", "ui"));
-    const worldLayer = root.add(new EL.Layer("WorldLayer", "world"));
+    const worldLayer = root.add(new EL.WarpLayer("WorldLayer", "world"));
+    const postLayer = root.add(new EL.Layer("PostFXLayer", "ui"));
     const hudLayer = root.add(new EL.Layer("HUDLayer", "ui"));
     const overlayLayer = root.add(new EL.Layer("OverlayLayer", "ui"));
     const modalLayer = root.add(new EL.Layer("ModalLayer", "ui"));
     const transLayer = root.add(new EL.Layer("TransitionLayer", "ui"));
 
     const v = { root, worldLayer, hudLayer, overlayLayer, modalLayer, transLayer };
+    EL.warp = worldLayer;
+    v.postfx = postLayer.add(new V.PostFXView());
+    v.postfx.v = v; v.postfx.visible = false;
     v.bg = bgLayer.add(new V.BackgroundView());
 
     // World
@@ -114,6 +118,7 @@
       const dpr = window.devicePixelRatio || 1;
       K = Math.max(1, Math.min(4, Math.round(s * dpr)));
       canvas.width = EL.W * K; canvas.height = EL.H * K;
+      EL.K = K;
     }
     window.addEventListener("resize", resize);
     resize();

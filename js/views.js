@@ -121,7 +121,9 @@
     }
     /* raw pointer → route input event (geometry only; legality decided elsewhere) */
     routeInput(phase, p) {
-      const lx = p.x - this.x, ly = p.y - this.y;
+      const l = this.globalToLocal(p.x, p.y);
+      const lx = l.x, ly = l.y;
+      p = { x: lx + this.x, y: ly + this.y };
       const tx = Math.floor(lx / T), ty = Math.floor(ly / T);
       const inside = tx >= 0 && ty >= 0 && tx < GW && ty < GH;
       const cx = tx * T + T / 2, cy = ty * T + T / 2;
@@ -130,8 +132,20 @@
     }
     tick(dt) { this.t += dt; }
     draw(ctx) {
+      // back wall (reads as distance once the floor is tilted)
+      ctx.fillStyle = "#130e1f"; ctx.fillRect(-12, -82, this.w + 24, 76);
+      for (let i = 0; i < 8; i++) {
+        const ax = -12 + i * 48;
+        ctx.fillStyle = "#1d1630"; ctx.fillRect(ax + 6, -70, 36, 64);
+        ctx.fillStyle = "#0b0814"; ctx.fillRect(ax + 12, -58, 24, 52); ctx.fillRect(ax + 16, -62, 16, 4);
+        ctx.fillStyle = "#2a2140"; ctx.fillRect(ax, -82, 6, 76); ctx.fillStyle = "#3a2f58"; ctx.fillRect(ax, -82, 2, 76);
+      }
+      for (let yy = -80; yy < -8; yy += 8) { ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fillRect(-12, yy, this.w + 24, 2); }
       // frame
       ctx.fillStyle = C.ink; ctx.fillRect(-8, -8, this.w + 16, this.h + 16);
+      // slab thickness under the near edge
+      ctx.fillStyle = "#0e0a18"; ctx.fillRect(-8, this.h + 8, this.w + 16, 10);
+      ctx.fillStyle = "#231a36"; ctx.fillRect(-8, this.h + 8, this.w + 16, 2);
       ctx.fillStyle = "#2b2140"; ctx.fillRect(-6, -6, this.w + 12, this.h + 12);
       ctx.fillStyle = "#4a3a66"; ctx.fillRect(-6, -6, this.w + 12, 2);
       ctx.fillStyle = "#171125"; ctx.fillRect(-4, -4, this.w + 8, this.h + 8);
@@ -667,6 +681,118 @@
   }
   V.FXView = FXView;
 
+  /* ================= HD-2D post processing =================
+     Runs right after the (tilted) world layer, before the HUD: dynamic
+     lighting, depth-of-field haze on the far wall, light shafts, bokeh and a
+     vignette. It only reads view parameters; it decides nothing. */
+  class PostFXView extends EL.Node {
+    constructor() {
+      super("PostFX");
+      this.v = null; this.t = 0; this.bokeh = [];
+      this.lc = document.createElement("canvas"); this.lc.width = 90; this.lc.height = 160;
+      this.bc = document.createElement("canvas"); this.bc.width = 72; this.bc.height = 128;
+      this.flash = 0;
+    }
+    tick(dt) {
+      this.t += dt;
+      if (this.bokeh.length < 9 && Math.random() < dt / 700)
+        this.bokeh.push({ x: Math.random() * 360, y: 660, r: U.rand(10, 28), vy: -U.rand(6, 16), vx: U.rand(-4, 4), a: U.rand(0.05, 0.12), life: U.rand(9000, 16000), c: Math.random() < 0.7 ? "255,160,80" : "180,150,255" });
+      for (const b of this.bokeh) { b.x += (b.vx * dt) / 1000; b.y += (b.vy * dt) / 1000; b.life -= dt; }
+      this.bokeh = this.bokeh.filter((b) => b.life > 0 && b.y > -40);
+    }
+    lights() {
+      const v = this.v, P = (x, y) => EL.warp.project(x, y), out = [];
+      const fl = (k) => 0.9 + 0.1 * Math.sin(this.t / 90 + k) + 0.05 * Math.sin(this.t / 37 + k * 3);
+      if (v.hero && v.hero.parent) { const p = P(v.hero.x, v.hero.y - 14); out.push([p.x, p.y, 120, "255,196,120", 0.95 * fl(0)]); }
+      for (const u of v.units.children) if (u !== v.hero) { const p = P(u.x, u.y - 12); out.push([p.x, p.y, 46, "255,190,120", 0.3]); }
+      const tr = v.footprints.trail, n = tr.length;
+      for (let k = v.footprints.cool; k < n; k++) {
+        const c = tc(tr[k].x, tr[k].y), p = P(c.x, c.y);
+        out.push([p.x, p.y, 44, "255,110,40", (0.25 + 0.35 * ((k + 1) / n)) * fl(k)]);
+      }
+      const b = v.board;
+      for (const [x, y] of [[BX - 4, BY - 4], [BX + b.w + 4, BY - 4], [BX - 4, BY + b.h + 4], [BX + b.w + 4, BY + b.h + 4]]) { const p = P(x, y); out.push([p.x, p.y, 80, "255,150,70", 0.75 * fl(x)]); }
+      for (const e of v.enemies.children) {
+        if (e.dead || e.alpha < 0.1) continue;
+        const r = e.rect(), p = P(r.x + r.s / 2, r.y + r.s / 2);
+        out.push([p.x, p.y, e.boss ? 130 : 60, e.phase2 ? "255,80,90" : "170,140,255", e.boss ? 0.6 : 0.55]);
+        if (!e.sealed) {
+          const d = DIRV[e.weak], q = P(r.x + r.s / 2 + (d[0] * r.s) / 2, r.y + r.s / 2 + (d[1] * r.s) / 2);
+          out.push([q.x, q.y, 40, "255,176,32", 0.55 + 0.35 * e.emph]);
+        }
+      }
+      for (const t of v.route.pts) { const c = tc(t.x, t.y), p = P(c.x, c.y); out.push([p.x, p.y, 34, "255,240,210", 0.28]); }
+      return out;
+    }
+    draw(ctx) {
+      if (!EL.warp || !EL.warp.enabled || !this.v) return;
+      const boss = this.v.bg.theme === "boss";
+      // 1. lightmap (quarter res) multiplied over the scene, then a soft additive glow
+      const lg = this.lc.getContext("2d");
+      lg.globalCompositeOperation = "source-over";
+      lg.fillStyle = boss ? "#8e6680" : "#8580b2";
+      lg.fillRect(0, 0, 90, 160);
+      lg.globalCompositeOperation = "lighter";
+      for (const [x, y, r, col, a] of this.lights()) {
+        const g = lg.createRadialGradient(x / 4, y / 4, 0, x / 4, y / 4, r / 4);
+        g.addColorStop(0, `rgba(${col},${a})`);
+        g.addColorStop(1, `rgba(${col},0)`);
+        lg.fillStyle = g;
+        lg.fillRect(x / 4 - r / 4, y / 4 - r / 4, r / 2, r / 2);
+      }
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;
+      ctx.globalCompositeOperation = "multiply";
+      ctx.drawImage(this.lc, 0, 0, 360, 640);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.14;
+      ctx.drawImage(this.lc, 0, 0, 360, 640);
+      ctx.restore();
+      // 2. depth of field: the far wall melts into haze
+      const bg = this.bc.getContext("2d");
+      bg.imageSmoothingEnabled = true;
+      bg.clearRect(0, 0, 72, 128);
+      bg.drawImage(ctx.canvas, 0, 0, ctx.canvas.width, ctx.canvas.height, 0, 0, 72, 128);
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;
+      const band = EL.warp.project(0, BY + 6).y;
+      for (let k = 0; k < 8; k++) {
+        const y0 = (band * k) / 8, h = band / 8 + 1;
+        ctx.globalAlpha = 1 - k / 8;
+        ctx.drawImage(this.bc, 0, y0 / 5, 72, h / 5, 0, y0, 360, h);
+      }
+      ctx.restore();
+      // 3. light shafts from the upper left + drifting bokeh
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      for (let i = 0; i < 3; i++) {
+        const sway = Math.sin(this.t / 3000 + i * 2) * 12;
+        const x0 = 20 + i * 110 + sway;
+        ctx.globalAlpha = 0.045 + 0.02 * Math.sin(this.t / 1700 + i);
+        const g = ctx.createLinearGradient(x0, 0, x0 + 120, 520);
+        g.addColorStop(0, boss ? "rgba(255,120,120,1)" : "rgba(255,210,150,1)");
+        g.addColorStop(1, "rgba(255,210,150,0)");
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0 + 46, 0); ctx.lineTo(x0 + 190, 520); ctx.lineTo(x0 + 110, 520); ctx.closePath(); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      for (const b of this.bokeh) {
+        const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
+        const a = b.a * Math.min(1, b.life / 2000);
+        g.addColorStop(0, `rgba(${b.c},${a})`); g.addColorStop(0.7, `rgba(${b.c},${a * 0.6})`); g.addColorStop(1, `rgba(${b.c},0)`);
+        ctx.fillStyle = g;
+        ctx.fillRect(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2);
+      }
+      ctx.restore();
+      // 4. vignette
+      const vg = ctx.createRadialGradient(180, 300, 120, 180, 300, 420);
+      vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(4,2,10,0.6)");
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, 360, 640);
+    }
+  }
+  V.PostFXView = PostFXView;
+
   /* ================= overlay ================= */
   class FloatTextView extends EL.Node {
     constructor() { super("DamageNumbers"); this.items = []; }
@@ -682,10 +808,11 @@
       for (const it of this.items) {
         const k = it.t / it.life;
         ctx.globalAlpha = base * (k > 0.7 ? 1 - (k - 0.7) / 0.3 : 1);
-        if (it.kind === "jp") A.jp(ctx, it.text, it.x, it.y, { size: it.size, align: "center", color: it.color });
+        const q = !it.screen && EL.warp ? EL.warp.project(it.x, it.y) : it;
+        if (it.kind === "jp") A.jp(ctx, it.text, q.x, q.y, { size: it.size, align: "center", color: it.color });
         else {
           const s = it.pop && it.t < 90 ? it.s + 1 : it.s;
-          A.text(ctx, it.text, it.x, it.y, { s, align: "center", color: it.color, grad: it.grad });
+          A.text(ctx, it.text, q.x, q.y, { s, align: "center", color: it.color, grad: it.grad });
         }
       }
       ctx.globalAlpha = base;

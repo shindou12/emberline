@@ -72,6 +72,8 @@
       v.hint.visible = battle;
       v.battleWorld.visible = battle;
       v.mapView.visible = map;
+      v.worldLayer.enabled = battle; // HD-2D tilt + lighting only on the battlefield
+      v.postfx.visible = battle;
     }
     hint(text) { this.v.hint.text = text; this.v.hint.t = 0; }
     toast(title, body, icon, ms) {
@@ -498,6 +500,8 @@
       const orb = v.orbs.add(new EL.Node("RefundOrb"));
       orb.x = x; orb.y = y; orb.k = 0;
       const tx = v.moveHUD.x + 62, ty = v.moveHUD.y + 22;
+      const s0 = EL.warp ? EL.warp.project(x, y) : { x, y };
+      x = s0.x; y = s0.y; orb.x = x; orb.y = y;
       const sx = x, sy = y, mx = (x + tx) / 2 + U.rand(-40, 40), my = Math.min(y, ty) - 80;
       orb.draw = (ctx) => {
         const f = Math.floor(EL.Time.ui / 60) % 2;

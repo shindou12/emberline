@@ -182,6 +182,79 @@ window.EL = window.EL || {};
   }
   EL.Layer = Layer;
 
+  /* HD-2D style pseudo-perspective: children render into an offscreen buffer
+     which is drawn in horizontal strips, narrower and flatter toward the top
+     so the board reads as a floor receding into the distance. toLocal() is
+     the exact inverse, so input hit-testing still lands on the right tile. */
+  class WarpLayer extends Layer {
+    constructor(name, clock) {
+      super(name, clock);
+      this.enabled = false; this.buf = null; this.bctx = null; this.K = 1;
+      this.top = 80; this.bot = 470; this.sTop = 0.8; this.vPow = 1.35;
+      this.table();
+    }
+    scaleAt(y) {
+      if (y >= this.bot) return 1;
+      if (y <= this.top) return this.sTop;
+      return this.sTop + (1 - this.sTop) * ((y - this.top) / (this.bot - this.top));
+    }
+    table() {
+      const H = EL.H, dy = new Float32Array(H + 1);
+      dy[this.bot] = this.bot;
+      for (let y = this.bot - 1; y >= 0; y--) dy[y] = dy[y + 1] - Math.pow(this.scaleAt(y + 0.5), this.vPow);
+      for (let y = this.bot + 1; y <= H; y++) dy[y] = dy[y - 1] + 1;
+      this.DY = dy;
+    }
+    destY(y) {
+      const yy = U.clamp(y, 0, EL.H), i = Math.min(EL.H - 1, Math.floor(yy)), f = yy - i;
+      return this.DY[i] + (this.DY[i + 1] - this.DY[i]) * f;
+    }
+    /* world coords → screen coords (for overlays: damage numbers, lights…) */
+    project(x, y) {
+      if (!this.enabled) return { x: x + this.x, y: y + this.y };
+      const s = this.scaleAt(y);
+      return { x: (x - 180) * s + 180 + this.x, y: this.destY(y) + this.y };
+    }
+    toLocal(x, y) {
+      if (!this.enabled) return super.toLocal(x, y);
+      x -= this.x; y -= this.y;
+      let lo = -200, hi = EL.H + 200;
+      const f = (sy) => (sy < 0 ? this.DY[0] + sy * Math.pow(this.sTop, this.vPow) : sy > EL.H ? this.DY[EL.H] + (sy - EL.H) : this.destY(sy));
+      for (let i = 0; i < 30; i++) { const m = (lo + hi) / 2; if (f(m) < y) lo = m; else hi = m; }
+      const sy = (lo + hi) / 2;
+      return { x: (x - 180) / this.scaleAt(sy) + 180, y: sy };
+    }
+    render(ctx) {
+      if (!this.enabled) return super.render(ctx);
+      if (!this.visible || this.alpha <= 0.003) return;
+      const K = EL.K || 1;
+      if (!this.buf || this.K !== K) {
+        this.K = K;
+        this.buf = document.createElement("canvas");
+        this.buf.width = EL.W * K; this.buf.height = EL.H * K;
+        this.bctx = this.buf.getContext("2d");
+      }
+      const b = this.bctx;
+      b.setTransform(1, 0, 0, 1, 0, 0);
+      b.clearRect(0, 0, this.buf.width, this.buf.height);
+      b.setTransform(K, 0, 0, K, 0, 0);
+      b.imageSmoothingEnabled = false;
+      b.globalAlpha = 1;
+      for (let i = 0; i < this.children.length; i++) this.children[i].render(b);
+      ctx.save();
+      ctx.globalAlpha *= this.alpha;
+      ctx.imageSmoothingEnabled = true;
+      const step = 2;
+      for (let y = 0; y < EL.H; y += step) {
+        const s = this.scaleAt(y + step / 2);
+        const d0 = this.DY[y], d1 = this.DY[Math.min(EL.H, y + step)];
+        ctx.drawImage(this.buf, 0, y * K, EL.W * K, step * K, 180 - 180 * s + this.x, d0 + this.y, EL.W * s, d1 - d0 + 0.5);
+      }
+      ctx.restore();
+    }
+  }
+  EL.WarpLayer = WarpLayer;
+
   /* ---------- input ----------
      Raw pointer events are converted here. Buttons get press visuals and emit
      'ui.click' on release. Route surfaces get phase callbacks and emit their
