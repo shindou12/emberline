@@ -217,9 +217,17 @@
 
   /* the ember trail: every tile walked burns until it cools */
   class FootprintView extends EL.Node {
-    constructor() { super("Footprints"); this.trail = []; this.cool = 0; this.births = new Map(); this.ashes = []; this.t = 0; this.heat = 1; }
+    constructor() { super("Footprints"); this.trail = []; this.cool = 0; this.births = new Map(); this.ashes = []; this.t = 0; this.heat = 1; this.sparks = []; }
     tick(dt) {
       this.t += dt;
+      const n = this.trail.length;
+      for (let k = this.cool; k < n; k++) {
+        if (Math.random() > dt / 260) continue;
+        const c = tc(this.trail[k].x, this.trail[k].y);
+        this.sparks.push({ x: c.x + U.rand(-18, 18), y: c.y + U.rand(-10, 16), vx: U.rand(-8, 8), vy: -U.rand(18, 46), life: U.rand(600, 1300), max: 0, hot: (k + 1) / n > 0.6 });
+      }
+      for (const s of this.sparks) { if (!s.max) s.max = s.life; s.life -= dt; s.x += (s.vx + Math.sin((this.t + s.max) / 200) * 10) * dt / 1000; s.y += (s.vy * dt) / 1000; }
+      this.sparks = this.sparks.filter((s) => s.life > 0);
       for (const a of this.ashes) a.t += dt;
       this.ashes = this.ashes.filter((a) => a.t < 700);
     }
@@ -280,6 +288,18 @@
         ctx.fillStyle = cooling ? "#6e626c" : k > n - 4 ? C.emberL : C.ember;
         A.pline(ctx, a.x, a.y, b.x, b.y, 2);
       }
+      // rising sparks (additive)
+      const op = ctx.globalCompositeOperation, ga = ctx.globalAlpha;
+      ctx.globalCompositeOperation = "lighter";
+      for (const s of this.sparks) {
+        const t = s.life / s.max;
+        ctx.globalAlpha = ga * Math.min(1, t * 1.5);
+        ctx.fillStyle = s.hot ? C.emberL : C.ember;
+        ctx.fillRect(U.snap(s.x), U.snap(s.y), 2, 2);
+        ctx.globalAlpha = ga * Math.min(1, t * 1.5) * 0.3;
+        ctx.fillRect(U.snap(s.x) - 2, U.snap(s.y) - 2, 6, 6);
+      }
+      ctx.globalCompositeOperation = op; ctx.globalAlpha = ga;
       // footprints
       for (let k = 1; k < n; k++) {
         const a = tr[k - 1], b = tr[k];
@@ -624,6 +644,7 @@
     ring(x, y, r, color, life, thick) { this.prims.push({ k: "ring", x, y, r, color, t: 0, life: life || 400, thick: thick || 2 }); }
     beam(x0, y0, x1, y1, color, life) { this.prims.push({ k: "beam", x0, y0, x1, y1, color, t: 0, life: life || 300 }); }
     tileFlash(tx, ty, color, life) { this.prims.push({ k: "tile", tx, ty, color, t: 0, life: life || 300 }); }
+    rays(x, y, n, len, color, life) { this.prims.push({ k: "rays", x, y, n, len, color, t: 0, life: life || 360, rot: Math.random() * 6 }); }
     ghost(sprite, x, y, flip, color) { this.prims.push({ k: "ghost", sprite, x, y, flip, color, t: 0, life: 220 }); }
     shatter(sprite, cx, bottom, s, flip, tint) {
       for (const ch of A.chunks(sprite, cx, bottom, s || 2, flip)) {
@@ -642,6 +663,8 @@
       for (const p of this.prims) {
         const k = p.t / p.life;
         ctx.globalAlpha = base * (1 - k);
+        if (p.k === "slash" || p.k === "ring" || p.k === "beam") ctx.globalCompositeOperation = "lighter";
+        else ctx.globalCompositeOperation = "source-over";
         if (p.k === "slash") {
           // arc of pixel squares sweeping across the target
           const ang = Math.atan2(p.dir[1], p.dir[0]);
@@ -666,6 +689,17 @@
           A.pline(ctx, p.x0, p.y0, p.x1, p.y1, Math.max(2, U.snap(8 * (1 - k))));
           ctx.fillStyle = "#fff";
           A.pline(ctx, p.x0, p.y0, p.x1, p.y1, 2);
+        } else if (p.k === "rays") {
+          const op = ctx.globalCompositeOperation;
+          ctx.globalCompositeOperation = "lighter";
+          ctx.fillStyle = p.color;
+          const e = U.ease.outCubic(k);
+          for (let i = 0; i < p.n; i++) {
+            const a = p.rot + (i / p.n) * Math.PI * 2;
+            const r0 = p.len * 0.25 * e, r1 = p.len * (0.35 + 0.65 * e);
+            A.pline(ctx, p.x + Math.cos(a) * r0, p.y + Math.sin(a) * r0 * 0.75, p.x + Math.cos(a) * r1, p.y + Math.sin(a) * r1 * 0.75, i % 2 ? 2 : 4);
+          }
+          ctx.globalCompositeOperation = op;
         } else if (p.k === "ghost") {
           ctx.globalAlpha = base * (1 - k) * 0.55;
           A.spr(ctx, p.sprite, U.snap(p.x), U.snap(p.y), { s: 2, flip: p.flip, white: 0.6 });
@@ -674,6 +708,7 @@
           ctx.fillRect(BX + p.tx * T + 2, BY + p.ty * T + 2, T - 4, T - 4);
         }
       }
+      ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = base;
       super.draw(ctx);
       ctx.globalAlpha = base;
@@ -691,10 +726,17 @@
       this.v = null; this.t = 0; this.bokeh = [];
       this.lc = document.createElement("canvas"); this.lc.width = 90; this.lc.height = 160;
       this.bc = document.createElement("canvas"); this.bc.width = 72; this.bc.height = 128;
-      this.flash = 0;
+      this.flash = 0; this.flashes = [];
+      this.bl = document.createElement("canvas"); this.bl.width = 90; this.bl.height = 160;
+      this.bl2 = document.createElement("canvas"); this.bl2.width = 90; this.bl2.height = 160;
+      this.bloom = 0.38;
     }
+    /* a short-lived light burst at a world position (hits, kills, skills) */
+    flashLight(x, y, r, col, a, life) { this.flashes.push({ x, y, r, col, a, life: life || 260, t: 0 }); }
     tick(dt) {
       this.t += dt;
+      for (const f of this.flashes) f.t += dt;
+      this.flashes = this.flashes.filter((f) => f.t < f.life);
       if (this.bokeh.length < 9 && Math.random() < dt / 700)
         this.bokeh.push({ x: Math.random() * 360, y: 660, r: U.rand(10, 28), vy: -U.rand(6, 16), vx: U.rand(-4, 4), a: U.rand(0.05, 0.12), life: U.rand(9000, 16000), c: Math.random() < 0.7 ? "255,160,80" : "180,150,255" });
       for (const b of this.bokeh) { b.x += (b.vx * dt) / 1000; b.y += (b.vy * dt) / 1000; b.life -= dt; }
@@ -722,6 +764,7 @@
         }
       }
       for (const t of v.route.pts) { const c = tc(t.x, t.y), p = P(c.x, c.y); out.push([p.x, p.y, 34, "255,240,210", 0.28]); }
+      for (const f of this.flashes) { const p = P(f.x, f.y), k = 1 - f.t / f.life; out.push([p.x, p.y, f.r * (0.7 + 0.3 * k), f.col, f.a * k * k]); }
       return out;
     }
     draw(ctx) {
@@ -747,6 +790,21 @@
       ctx.globalCompositeOperation = "lighter";
       ctx.globalAlpha = 0.14;
       ctx.drawImage(this.lc, 0, 0, 360, 640);
+      ctx.restore();
+      // 1b. bloom: downsample, crush midtones (x^3) so only bright areas remain, add back blurred
+      const b1 = this.bl.getContext("2d"), b2 = this.bl2.getContext("2d");
+      b1.globalCompositeOperation = "source-over"; b1.imageSmoothingEnabled = true;
+      b1.clearRect(0, 0, 90, 160);
+      b1.drawImage(ctx.canvas, 0, 0, ctx.canvas.width, ctx.canvas.height, 0, 0, 90, 160);
+      b2.globalCompositeOperation = "source-over"; b2.clearRect(0, 0, 90, 160); b2.drawImage(this.bl, 0, 0);
+      b1.globalCompositeOperation = "multiply"; b1.drawImage(this.bl2, 0, 0); b1.drawImage(this.bl2, 0, 0);
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = this.bloom;
+      ctx.drawImage(this.bl, 0, 0, 360, 640);
+      ctx.globalAlpha = this.bloom * 0.5;
+      ctx.drawImage(this.bl, -8, -8, 376, 656);
       ctx.restore();
       // 2. depth of field: the far wall melts into haze
       const bg = this.bc.getContext("2d");

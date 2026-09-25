@@ -190,7 +190,7 @@ window.EL = window.EL || {};
     constructor(name, clock) {
       super(name, clock);
       this.enabled = false; this.buf = null; this.bctx = null; this.K = 1;
-      this.top = 80; this.bot = 470; this.sTop = 0.8; this.vPow = 1.35;
+      this.top = 80; this.bot = 470; this.sTop = 0.8; this.vPow = 1.35; this.zoom = 1; this.zc = { x: 180, y: 300 };
       this.table();
     }
     scaleAt(y) {
@@ -213,11 +213,14 @@ window.EL = window.EL || {};
     project(x, y) {
       if (!this.enabled) return { x: x + this.x, y: y + this.y };
       const s = this.scaleAt(y);
-      return { x: (x - 180) * s + 180 + this.x, y: this.destY(y) + this.y };
+      const px = (x - 180) * s + 180, py = this.destY(y);
+      const z = this.zoom;
+      return { x: this.zc.x + (px - this.zc.x) * z + this.x, y: this.zc.y + (py - this.zc.y) * z + this.y };
     }
     toLocal(x, y) {
       if (!this.enabled) return super.toLocal(x, y);
       x -= this.x; y -= this.y;
+      x = this.zc.x + (x - this.zc.x) / this.zoom; y = this.zc.y + (y - this.zc.y) / this.zoom;
       let lo = -200, hi = EL.H + 200;
       const f = (sy) => (sy < 0 ? this.DY[0] + sy * Math.pow(this.sTop, this.vPow) : sy > EL.H ? this.DY[EL.H] + (sy - EL.H) : this.destY(sy));
       for (let i = 0; i < 30; i++) { const m = (lo + hi) / 2; if (f(m) < y) lo = m; else hi = m; }
@@ -244,6 +247,7 @@ window.EL = window.EL || {};
       ctx.save();
       ctx.globalAlpha *= this.alpha;
       ctx.imageSmoothingEnabled = true;
+      if (this.zoom !== 1) { ctx.translate(this.zc.x, this.zc.y); ctx.scale(this.zoom, this.zoom); ctx.translate(-this.zc.x, -this.zc.y); }
       const step = 2;
       for (let y = 0; y < EL.H; y += step) {
         const s = this.scaleAt(y + step / 2);
@@ -390,6 +394,20 @@ window.EL = window.EL || {};
           ctx.fillRect(U.snap(p.x - sz), U.snap(p.y - 1), sz * 2, 2);
         }
       }
+      // additive halo pass: glowing embers/sparks bloom into their surroundings
+      const op = ctx.globalCompositeOperation;
+      ctx.globalCompositeOperation = "lighter";
+      for (const p of this.ps) {
+        if (!p.glow) continue;
+        const t = U.clamp(p.life / p.max, 0, 1);
+        ctx.globalAlpha = base * Math.min(1, t * 2) * 0.35;
+        let col = p.color;
+        if (p.colors) col = p.colors[Math.min(p.colors.length - 1, Math.floor((1 - t) * p.colors.length))];
+        ctx.fillStyle = col;
+        const hs = Math.max(4, p.size * 2.5);
+        ctx.fillRect(U.snap(p.x - hs / 2), U.snap(p.y - hs / 2), U.snap(hs), U.snap(hs));
+      }
+      ctx.globalCompositeOperation = op;
       ctx.globalAlpha = base;
     }
   }

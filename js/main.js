@@ -83,6 +83,15 @@
   function makeCamera(world) {
     const cam = { amt: 0, t: 0, dur: 1 };
     cam.shake = (a, ms) => { if (a >= cam.amt * (1 - cam.t / cam.dur)) { cam.amt = a; cam.t = 0; cam.dur = ms; } };
+    /* zoom punch toward a world point (HD-2D camera kick on big hits) */
+    cam.punch = (amt, x, y) => {
+      if (!world.project) return;
+      const p = world.project(x, y);
+      world.zc = { x: p.x - world.x, y: p.y - world.y };
+      EL.tweens.kill(world);
+      world.zoom = 1 + amt;
+      EL.tween(world, { zoom: 1 }, 260, { clock: "ui", ease: U.ease.outCubic });
+    };
     cam.update = (dt) => {
       cam.t += dt;
       const k = Math.max(0, 1 - cam.t / cam.dur);

@@ -390,6 +390,7 @@
       const from = feet(ev.from);
       v.fx.burst(from.x, from.y - 2, 4, { speed: [10, 40], life: [200, 400], palette: ["#6e3a2a", "#8a5a40"], size: 2, angle: -Math.PI / 2, spread: 2 });
       S.play(into ? "dash" : "foot", this.footN++);
+      v.fx.burst(from.x, from.y - 4, into ? 8 : 3, { speed: [30, 110], life: [180, 420], palette: [C.emberL, C.ember], size: 2, glow: true, ay: -40, drag: 0.04 });
       const hero = v.hero;
       v.fx.ghost(hero.sprite, hero.x, hero.y, hero.flip);
       if (this.chain >= 2) v.fx.ghost(hero.sprite, (hero.x + feet(ev.to).x) / 2, (hero.y + feet(ev.to).y) / 2, hero.flip);
@@ -412,7 +413,9 @@
       EL.tween(evw, { ox: 0, oy: 0 }, 220, { ease: U.ease.outBack });
       evw.hp = ev.hp;
       const ang = Math.atan2(ev.dir[1], ev.dir[0]);
-      v.fx.burst(hx, hy, ev.weak ? 22 : 10, { angle: ang, spread: 1.6, speed: [80, 260], life: [150, 380], palette: ev.weak ? ["#fff6df", "#ffd35a", "#ffb020", "#ff8a2a"] : ["#fff6df", "#d3dbea", "#ffd35a"], sizes: [2, 4], drag: 0.08 });
+      v.fx.burst(hx, hy, ev.weak ? 30 : 14, { angle: ang, spread: 1.6, speed: [80, 300], life: [150, 420], palette: ev.weak ? ["#fff6df", "#ffd35a", "#ffb020", "#ff8a2a"] : ["#fff6df", "#d3dbea", "#ffd35a"], sizes: [2, 4], drag: 0.08, glow: true });
+      v.postfx.flashLight(hx, hy, ev.weak ? 170 : 100, ev.weak ? "255,190,80" : "255,240,220", ev.weak ? 1 : 0.7, ev.weak ? 320 : 200);
+      if (ev.weak) { v.fx.rays(hx, hy, 10, 56, C.emberL, 320); this.cam.punch(0.04, hx, hy); }
       if (ev.weak) {
         v.floats.spawn(ev.dmg, hx, hy - 30, { s: 4, color: C.weak, grad: "#ffffff", life: 900, vy: -80 });
         v.floats.spawn(ev.forced ? "WEAK!!" : "WEAK!", hx, hy - 58, { s: 2, color: C.emberL, life: 800, vy: -50 });
@@ -445,7 +448,8 @@
       h.red = 1; EL.tween(h, { red: 0 }, 260);
       h.ox = -6; EL.tween(h, { ox: 0 }, 220, { ease: U.ease.outElastic });
       v.floats.spawn("-" + ev.dmg, h.x, h.y - 50, { s: 3, color: "#ff4d5e", life: 800 });
-      v.fx.burst(h.x, h.y - 16, 10, { speed: [60, 180], life: [200, 400], palette: ["#ff4d5e", "#ff8f9b", "#8f2231"], size: 2 });
+      v.fx.burst(h.x, h.y - 16, 14, { speed: [60, 200], life: [200, 420], palette: ["#ff4d5e", "#ff8f9b", "#8f2231"], size: 2, glow: true });
+      v.postfx.flashLight(h.x, h.y - 16, 120, "255,70,90", 0.9, 300);
       v.playerHUD.hp = ev.hp; v.playerHUD.shake = 3; v.playerHUD.flash = 0.6;
       EL.tween(v.playerHUD, { shake: 0, flash: 0 }, 300, { clock: "ui" });
       v.vignette.red = 0.6; EL.tween(v.vignette, { red: 0 }, 380, { clock: "ui" });
@@ -473,7 +477,12 @@
       evw.dead = true;
       v.fx.shatter(evw.sprite, cx, bottom, evw.boss ? 3 : 2, evw.flip);
       v.fx.ring(cx, r.y + r.s / 2, evw.boss ? 70 : 34, C.emberL, 420, 4);
-      v.fx.burst(cx, r.y + r.s / 2, 14, { speed: [40, 160], life: [300, 700], palette: [C.ember, C.emberL, "#c24a12"], size: 2, ay: -60 });
+      v.fx.burst(cx, r.y + r.s / 2, 26 + Math.min(6, ev.chain || 1) * 4, { speed: [40, 220], life: [400, 900], palette: [C.ember, C.emberL, "#c24a12", C.cream], sizes: [2, 4], ay: -90, drag: 0.03, glow: true });
+      const ck = Math.min(6, ev.chain || 1);
+      v.postfx.flashLight(cx, r.y + r.s / 2, 170 + ck * 18, "255,200,110", 1, 420);
+      v.fx.rays(cx, r.y + r.s / 2, 10 + ck * 2, 60 + ck * 10, C.emberL, 380);
+      if (ck >= 3) v.fx.rays(cx, r.y + r.s / 2, 16, 90 + ck * 10, C.cream, 460);
+      this.cam.punch(0.02 + ck * 0.008, cx, r.y + r.s / 2);
       v.fx.tileFlash(evw.tx, evw.ty, "rgba(255,211,90,0.5)", 260);
       const c = Math.max(1, ev.chain || 1);
       S.play("kill", c);
@@ -542,12 +551,17 @@
       ci2.comp = null;
       const hero = v.hero;
       const here = tc(this.path[this.path.length - 1].x, this.path[this.path.length - 1].y);
+      const SKL = { pierce: "255,230,120", burst: "255,140,60", haste: "140,220,255", volley: "150,240,130", guard: "140,200,255", shadow: "170,130,255", ring: "130,210,255" };
+      const lc = ev.effect === "burst" ? tc(ev.data.center.x, ev.data.center.y) : here;
+      v.postfx.flashLight(lc.x, lc.y, ev.effect === "burst" || ev.effect === "ring" ? 260 : 170, SKL[ev.effect] || "255,255,255", 1, 600);
+      v.fx.rays(lc.x, lc.y, 14, 80, D.COMPANIONS[ev.comp].color, 480);
       switch (ev.effect) {
         case "pierce": {
           const to = ev.data.target ? this.enemyTile(ev.data.target) : { x: ev.data.to.x - ev.data.dir[0], y: ev.data.to.y - ev.data.dir[1] };
           const b = tc(to.x, to.y);
           v.fx.beam(here.x, here.y, b.x, b.y, C.emberL, 360);
-          v.fx.burst(b.x, b.y, 16, { speed: [60, 200], life: [200, 400], palette: [C.emberL, C.cream], size: 2 });
+          v.fx.burst(b.x, b.y, 24, { speed: [60, 220], life: [200, 450], palette: [C.emberL, C.cream], size: 2, glow: true });
+          v.postfx.flashLight(b.x, b.y, 140, "255,230,120", 1, 360);
           S.play("beam"); this.cam.shake(4, 160);
           break;
         }
@@ -556,7 +570,8 @@
           for (const t of ev.data.area) if (t.x >= 0 && t.y >= 0 && t.x < 7 && t.y < 8) v.fx.tileFlash(t.x, t.y, "rgba(255,138,42,0.55)", 420);
           v.fx.ring(c.x, c.y, 80, C.ember, 460, 4);
           v.fx.ring(c.x, c.y, 50, C.emberL, 360, 4);
-          v.fx.burst(c.x, c.y, 40, { speed: [60, 240], life: [300, 700], palette: [C.ember, C.emberL, "#ff4d5e", C.cream], sizes: [2, 4], ay: -120 });
+          v.fx.burst(c.x, c.y, 60, { speed: [60, 280], life: [300, 800], palette: [C.ember, C.emberL, "#ff4d5e", C.cream], sizes: [2, 4], ay: -120, glow: true });
+          this.cam.punch(0.05, c.x, c.y);
           S.play("fire"); this.cam.shake(7, 260);
           break;
         }
@@ -639,7 +654,13 @@
       EL.hitstop(900);
       S.play("phase");
       this.cam.shake(8, 900);
-      if (evw) { evw.phase2 = true; evw.flash = 1; EL.tween(evw, { flash: 0 }, 800, { clock: "ui" }); }
+      if (evw) {
+        evw.phase2 = true; evw.flash = 1; EL.tween(evw, { flash: 0 }, 800, { clock: "ui" });
+        const r = evw.rect();
+        v.postfx.flashLight(r.x + r.s / 2, r.y + r.s / 2, 340, "255,60,80", 1, 1100);
+        v.fx.rays(r.x + r.s / 2, r.y + r.s / 2, 20, 150, "#ff4d5e", 900);
+        v.fx.burst(r.x + r.s / 2, r.y + r.s / 2, 50, { speed: [60, 260], life: [500, 1100], palette: ["#ff4d5e", "#ff8a2a", "#7af0ff"], sizes: [2, 4], glow: true, ay: -60 });
+      }
       v.bg.pulse = 1; EL.tween(v.bg, { pulse: 0.4 }, 900, { clock: "ui" });
       await this.banner("ARMOR", "灰冠が覚醒した — 弱点以外の攻撃は半減", "#ff8a2a", 1300);
     }
@@ -695,7 +716,7 @@
             const h = v.hero;
             const dist = Math.hypot(h.x - sx, h.y - 16 - sy);
             const sp = 520;
-            v.fx.add({ x: sx, y: sy, vx: ((h.x - sx) / dist) * sp, vy: ((h.y - 16 - sy) / dist) * sp, life: (dist / sp) * 1000, size: 6, colors: ["#e9dcff", "#b08cff", "#5c34b0"], shrink: false });
+            v.fx.add({ x: sx, y: sy, vx: ((h.x - sx) / dist) * sp, vy: ((h.y - 16 - sy) / dist) * sp, life: (dist / sp) * 1000, size: 6, colors: ["#e9dcff", "#b08cff", "#5c34b0"], shrink: false, glow: true });
             for (let k = 0; k < 4; k++) v.fx.add({ x: sx, y: sy, vx: ((h.x - sx) / dist) * sp * 0.9, vy: ((h.y - 16 - sy) / dist) * sp * 0.9, life: (dist / sp) * 1000 * 1.05, size: 2, color: "#b08cff", delay: 0 });
             S.play("bolt");
             pending.push(ev);
@@ -709,7 +730,8 @@
             h.ox = -8; EL.tween(h, { ox: 0 }, 300, { ease: U.ease.outElastic });
             if (ev.total > 0) v.floats.spawn("-" + ev.total, h.x, h.y - 56, { s: 4, color: "#ff4d5e", grad: "#ffb0b8", life: 1100 });
             if (ev.reduced) v.floats.spawn("余熱 -" + ev.reduced, h.x, h.y - 88, { kind: "jp", color: C.emberL, life: 1100, vy: -30 });
-            v.fx.burst(h.x, h.y - 16, 20, { speed: [60, 200], life: [200, 500], palette: ["#b08cff", "#ff4d5e", "#5c34b0"], size: 2 });
+            v.fx.burst(h.x, h.y - 16, 28, { speed: [60, 220], life: [200, 550], palette: ["#b08cff", "#ff4d5e", "#5c34b0"], size: 2, glow: true });
+            v.postfx.flashLight(h.x, h.y - 16, 170, "180,110,255", 1, 500);
             v.playerHUD.hp = ev.hp; v.playerHUD.shake = 4; v.playerHUD.flash = 0.7;
             EL.tween(v.playerHUD, { shake: 0, flash: 0 }, 400, { clock: "ui" });
             v.vignette.red = 1; EL.tween(v.vignette, { red: 0 }, 600, { clock: "ui" });
@@ -736,7 +758,8 @@
             evw.alpha = 0; evw.oy = 10;
             const r = evw.rect();
             v.fx.ring(r.x + r.s / 2, r.y + r.s / 2, 30, "#b08cff", 500, 4);
-            v.fx.burst(r.x + r.s / 2, r.y + r.s / 2, 16, { speed: [30, 90], life: [300, 600], palette: ["#b08cff", "#5c34b0", "#e9dcff"], size: 2, ay: -60 });
+            v.fx.burst(r.x + r.s / 2, r.y + r.s / 2, 22, { speed: [30, 110], life: [300, 700], palette: ["#b08cff", "#5c34b0", "#e9dcff"], size: 2, ay: -60, glow: true });
+            v.postfx.flashLight(r.x + r.s / 2, r.y + r.s / 2, 120, "170,120,255", 0.9, 500);
             EL.tween(evw, { alpha: 1, oy: 0 }, 360, { ease: U.ease.outBack });
             S.play("summon");
             await EL.wait(280);
@@ -1055,7 +1078,7 @@
         EL.Time.slow = 1;
         S.bgm(null);
         S.play("victory"); S.voice(run.heroId, "cheer");
-        for (let i = 0; i < 3; i++) setTimeout(() => v.hudFx.burst(U.rand(60, 300), U.rand(200, 360), 24, { speed: [40, 200], life: [500, 1100], palette: [C.ember, C.emberL, C.cream, C.gold], sizes: [2, 4], ay: 120 }), i * 180);
+        for (let i = 0; i < 3; i++) setTimeout(() => v.hudFx.burst(U.rand(60, 300), U.rand(200, 360), 24, { speed: [40, 200], life: [500, 1100], palette: [C.ember, C.emberL, C.cream, C.gold], sizes: [2, 4], ay: 120, glow: true }), i * 180);
         run.stats.battles++;
         await this.banner(B.isBoss ? "CONQUERED" : "VICTORY", B.isBoss ? "灰冠の王を討ち果たした" : `撃破！ ${B.turn}ターンで制圧`, C.gold, 900);
         if (!B.isBoss) {
@@ -1280,7 +1303,8 @@
     this.path = B.trail.map((t) => ({ x: t.x, y: t.y }));
     // companions settle onto the (possibly shortened) trail
     const spots = this.companionSpots(B.hero, true);
-    this.compViews.forEach((u, i) => this.unitTo(u, spots[i] || this.path[0], 200));
+    // no free trail tile left behind the hero: huddle next to the last free spot (never on an enemy)
+    this.compViews.forEach((u, i) => this.unitTo(u, spots[i] || spots[spots.length - 1] || B.hero, 200));
     this.refreshEnemyStatics();
     this.coolPreview();
   };
