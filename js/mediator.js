@@ -275,6 +275,7 @@
         ev.sealed = L.sealedBy(B.enemies, e);
         ev.weak = e.weak; ev.hp = e.hp; ev.phase2 = e.boss && B.phase2;
         ev.pressure = L.enemyPressure(this.run, B, e);
+        ev.grow = e.grow || 0;
         ev.flip = e.weak === "L";
         ev.tangled = !!e.tangled;
         ev.tx = e.x; ev.ty = e.y;
@@ -289,7 +290,7 @@
     clearTargets() {
       for (const k in this.enemyViews) {
         const ev = this.enemyViews[k];
-        ev.target = false; ev.kill = false; ev.dmg = null; ev.guardDmg = null; ev.blocked = false; ev.dmgWeak = false; ev.pushOnly = false;
+        ev.target = false; ev.kill = false; ev.dmg = null; ev.guardDmg = null; ev.blocked = false; ev.dmgWeak = false; ev.pushOnly = false; ev.willGrow = false;
       }
     }
     resetTurnHud() {
@@ -374,6 +375,7 @@
         const dmg = e.hp - Math.max(0, p.hp);
         if (dmg > 0 || !p.alive) { ev.target = true; ev.dmg = dmg; ev.kill = !p.alive; ev.refund = !p.alive ? refundOf[e.uid] || 0 : 0; }
         if (!p.alive) kills++;
+        ev.willGrow = p.alive && !res.T.touched.has(e.uid) && this.route.length > 1;
       }
       rt.skillMarks = []; rt.areas = []; rt.pushes = []; rt.guardHits = [];
       let guardDmg = 0;
@@ -976,6 +978,19 @@
             v.floats.spawn("同士討ち", r.x + r.s / 2, r.y - 30, { kind: "jp", color: C.emberL, life: 800, vy: -30 });
             S.play("slash"); EL.hitstop(60);
             await EL.wait(160);
+            break;
+          }
+          case "grow": {
+            for (const uid of ev.uids) {
+              const w = this.enemyViews[uid];
+              if (!w || w.dead) continue;
+              const r = w.rect();
+              v.floats.spawn("圧+1", r.x + r.s / 2, r.y - 4, { kind: "jp", color: "#ff9ee0", life: 800, vy: -30 });
+              v.fx.burst(r.x + 10, r.y + 8, 6, { speed: [20, 60], life: [300, 600], palette: ["#ff6ad0", "#b08cff"], size: 2, ay: -60, glow: true });
+            }
+            this.refreshEnemyStatics();
+            S.play("bolt");
+            await EL.wait(260);
             break;
           }
           case "untangle": {

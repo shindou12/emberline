@@ -418,7 +418,7 @@
       guardBlock: (run.heroId === "gorm" ? 1 : 0) + (has(run, "shade") ? 1 : 0), guardHits: 0,
       forcedWeak: 0, uses: {}, marks: {}, dirs: [], straight: 0, route: [route[0]],
       compassUsed: false, plumeUsed: run.plumeUsed, bumps: 0, tangles: 0, multi: 0,
-      cold: new Set(), coldAt: [false], hitCount: {},
+      cold: new Set(), coldAt: [false], hitCount: {}, touched: new Set(),
     };
     const events = [], steps = [];
     let outcome = "ok", last = 0, done = false;
@@ -445,6 +445,7 @@
       if (!alive().length) { outcome = "victory"; push({ type: "victory" }); done = true; }
     }
     function damage(e, dmg, src, rec, extra) {
+      T.touched.add(e.uid);
       e.hp -= dmg;
       const type = src === "hero" ? "attack" : src === "bump" ? "bump" : "skillHit";
       push(Object.assign({ type, uid: e.uid, dmg, hp: Math.max(0, e.hp), maxHp: e.maxHp }, extra || {}));
@@ -654,6 +655,7 @@
             T.attacks++;
             rec.attacks.push({ uid: e.uid, dmg: 0, weak: false, pushOnly: true, kill: false });
             push({ type: "attack", uid: e.uid, dmg: 0, hp: e.hp, maxHp: e.maxHp, pushOnly: true, dir: d, diag, tile: { x: b.x, y: b.y } });
+            T.touched.add(e.uid);
             shove(e, d, rec);
           } else {
             const sealed = sealedBy(st.enemies, e);
@@ -707,6 +709,7 @@
     s.chain = Math.max(s.chain, res.T.chain);
     s.weak += res.T.weakHits; s.bumps += res.T.bumps; s.multi = Math.max(s.multi, res.T.multi); s.guardHits += res.T.guardHits;
     B.lastT = res.T;
+    B.touched = res.T.touched;
   }
 
   /* ---------- enemy phase (mutates B/run, returns events to replay) ---------- */
@@ -803,6 +806,11 @@
         else { run.hp = 0; push({ type: "heroDown" }); return events; }
       }
     }
+    // 4b. the night grows on every enemy you left alone this turn (+1 pressure from next turn on)
+    const grown = [];
+    for (const e of alive()) if (!(B.touched && B.touched.has(e.uid))) { e.grow = (e.grow || 0) + 1; grown.push(e.uid); }
+    B.touched = null;
+    if (grown.length) push({ type: "grow", uids: grown });
     // 5. tangles come loose
     const moved = [], seenTile = new Set();
     for (const e of alive()) {
@@ -1028,6 +1036,7 @@
   function enemyPressure(run, B, e) {
     let p = e.pressure - (has(run, "coal") ? 1 : 0);
     if (e.boss && B.phase2) p += 1;
+    p += e.grow || 0;
     return Math.max(0, p);
   }
   function pressureOf(run, B, enemies) {

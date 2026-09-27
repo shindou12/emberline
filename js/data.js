@@ -85,7 +85,7 @@
     caller: { name: "呼び声", sprite: "caller", hp: 8, atk: 1, pressure: 1, summons: true, ai: "flee", desc: "逃げ回りながら殻喰いを呼ぶ。" },
     totem: { name: "結界柱", sprite: "totem", hp: 10, atk: 0, pressure: 1, seals: true, ai: "static", desc: "周囲2マスの敵の弱点を封じる。倒すか、範囲の外へ押し出せば弱点が戻る。" },
     brute: { name: "骨砕き", sprite: "brute", hp: 17, atk: 3, pressure: 2, ai: "slow", tele: "cross", teleDmg: 5, desc: "2ターンに1歩。十字に大槌を振り下ろす。" },
-    boss: { name: "灰冠の王ヴォルグ", sprite: "boss", hp: 60, atk: 2, pressure: 4, size: 2, boss: true, ai: "static", tele: "boss", teleDmg: 4, desc: "深層の主。弱点は毎ターン巡り、灰の波で列を薙ぐ。押し出せない。" },
+    boss: { name: "灰冠の王ヴォルグ", sprite: "boss", hp: 54, atk: 2, pressure: 4, size: 2, boss: true, ai: "static", tele: "boss", teleDmg: 4, desc: "深層の主。弱点は毎ターン巡り、灰の波で列を薙ぐ。押し出せない。" },
   };
 
   /* Relics change *how* you draw routes, not just numbers. */

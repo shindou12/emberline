@@ -609,6 +609,7 @@
       this.tx = e.x; this.ty = e.y; this.hp = e.hp; this.maxHp = e.maxHp; this.shownHp = e.hp;
       this.weak = e.weak; this.sealed = false; this.pressure = e.pressure; this.boss = !!e.boss;
       this.emph = 0; this.target = false; this.kill = false; this.dmg = null; this.dmgWeak = false; this.guardDmg = null; this.blocked = false; this.pushOnly = false;
+      this.grow = 0; this.willGrow = false;
       this.tangled = false; this.sox = 0; this.soy = 0; this.push = null;
       this.flash = 0; this.ox = 0; this.oy = 0; this.t = Math.random() * 1000; this.spin = 0; this.phase2 = false; this.intent = d.summons ? "summon" : null;
       this.flip = false; this.dead = false; this.lunge = 0;
@@ -629,9 +630,17 @@
       for (let i = 0; i < this.pressure; i++) {
         const fx = r.x + 5 + i * 6, fy = r.y + 5;
         const f = (Math.floor(this.t / 160) + i) % 2;
+        const grown = i >= this.pressure - this.grow; // flames added by neglect burn hotter
         ctx.fillStyle = C.ink; ctx.fillRect(fx - 1, fy - 1, 6, 8);
-        ctx.fillStyle = "#b08cff"; ctx.fillRect(fx, fy + 2 - f, 4, 4 + f);
-        ctx.fillStyle = "#e9dcff"; ctx.fillRect(fx + 1, fy + 4, 2, 2);
+        ctx.fillStyle = grown ? "#ff6ad0" : "#b08cff"; ctx.fillRect(fx, fy + 2 - f, 4, 4 + f);
+        ctx.fillStyle = grown ? "#ffd0f0" : "#e9dcff"; ctx.fillRect(fx + 1, fy + 4, 2, 2);
+      }
+      if (this.willGrow) {
+        // untouched by the planned route: its pressure rises by one next turn
+        const fx = r.x + 5 + this.pressure * 6, k = Math.floor(this.t / 200) % 2;
+        ctx.fillStyle = C.ink; ctx.fillRect(fx - 1, r.y + 3, 13, 10);
+        ctx.fillStyle = k ? "#ff6ad0" : "#b04aa0"; ctx.fillRect(fx, r.y + 4, 11, 8);
+        A.text(ctx, "+1", fx + 6, r.y + 5, { s: 1, align: "center", color: "#fff6df" });
       }
       // sprite
       const s = this.boss ? 3 : 2;
@@ -1692,7 +1701,7 @@
     { t: "攻撃予告", b: "骨砕きとボスは、次の敵ターンに攻撃するマスを黄色く予告する。そこで終わると被弾。押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
     { t: "撃破で移動回復", b: "敵を倒すと移動力が回復する（1ルートで最初の撃破は+2、2体目からは+1）。倒して、進んで、また倒す。長い連鎖が勝利への近道。", demo: "chain" },
     { t: "燠火の足跡", b: "歩いたマスは燃えて、しばらく入れない。斜めに交差するのはOK。敵がいたマスは燃えないので、もう一度踏み込める。仲間が増えるほど足跡は長く残る。", demo: "ember" },
-    { t: "夜の圧", b: "ターン終了時、生き残った敵の数だけダメージを受ける。紫の炎の数がその敵の圧。のんびりしていると押し潰される。", demo: "pressure" },
+    { t: "夜の圧", b: "ターン終了時、生き残った敵の圧（紫の炎）の分だけダメージを受ける。そのターンに斬る・押すなどで触れなかった敵は、次のターンから圧が+1ずつ溜まっていく。", demo: "pressure" },
     { t: "戦闘目標", b: "右上の2つの札は、この戦闘の目標と報酬。達成して勝つと、その報酬がもらえる。欲しいものがあれば狙ってみよう。", demo: "route" },
     { t: "仲間の力", b: "仲間はルートの「形」で能力を発動する。直進、L字、ジグザグ、輪…。描く道そのものが作戦になる。", demo: "comp" },
   ];
