@@ -59,6 +59,15 @@ function claim(run, B, turn) {
 }
 function battle(run, node, log) {
   const B = L.genBattle(run, node);
+  // opening: try each start spot and keep the one with the best first route
+  let bestStart = B.starts[0], bestS = -Infinity;
+  for (const s of B.starts) {
+    B.hero = { x: s.x, y: s.y }; B.trail = [{ x: s.x, y: s.y }]; L.planTelegraphs(B);
+    const r = bestRoute(B, run);
+    const sc = r ? score(L.simulate(B, run, r), B, run) : -Infinity;
+    if (sc > bestS) { bestS = sc; bestStart = s; }
+  }
+  B.hero = { x: bestStart.x, y: bestStart.y }; B.trail = [{ x: bestStart.x, y: bestStart.y }]; L.planTelegraphs(B);
   for (let turn = 1; turn <= 20; turn++) {
     L.unstick(B);
     const route = bestRoute(B, run);

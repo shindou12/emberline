@@ -118,7 +118,7 @@
       this.interactive = true; this.inputKind = "route";
       this.tiles = new Array(GW * GH).fill(0);
       this.dim = 0; this.reach = null; this.entries = []; this.entryEmph = 0; this.t = 0; this.cursor = null; this.heroTile = null; this.heroHint = 0;
-      this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.seals = [];
+      this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.seals = []; this.starts = [];
     }
     /* raw pointer → route input event (geometry only; legality decided elsewhere) */
     routeInput(phase, p) {
@@ -202,6 +202,22 @@
           A.dither(ctx, px + 6, py + 6, T - 12, T - 12, C.weak, Math.floor(this.t / 200) % 2);
           ctx.globalAlpha = 1;
         }
+      }
+      // opening spots: any of them can be the start of the first route
+      for (const s of this.starts) {
+        if (this.heroTile && s.x === this.heroTile.x && s.y === this.heroTile.y) continue;
+        const px = s.x * T, py = s.y * T;
+        const k = 0.5 + 0.5 * Math.sin(this.t / 180 + s.x);
+        ctx.globalAlpha = 0.18 + 0.14 * k;
+        A.dither(ctx, px + 4, py + 4, T - 8, T - 8, C.emberL, Math.floor(this.t / 220) % 2);
+        ctx.globalAlpha = 0.55 + 0.35 * k;
+        ctx.fillStyle = C.emberL;
+        const L = 9;
+        ctx.fillRect(px + 3, py + 3, L, 2); ctx.fillRect(px + 3, py + 3, 2, L);
+        ctx.fillRect(px + T - 3 - L, py + 3, L, 2); ctx.fillRect(px + T - 5, py + 3, 2, L);
+        ctx.fillRect(px + 3, py + T - 5, L, 2); ctx.fillRect(px + 3, py + T - 3 - L, 2, L);
+        ctx.fillRect(px + T - 3 - L, py + T - 5, L, 2); ctx.fillRect(px + T - 5, py + T - 3 - L, 2, L);
+        ctx.globalAlpha = 1;
       }
       // hero pulse hint ("drag from me")
       if (this.heroTile && this.heroHint > 0.01) {
@@ -1676,7 +1692,7 @@
   V.PauseView = PauseView;
 
   const HELP = [
-    { t: "ルートを描く", b: "主人公から指をすべらせて、進む道を描く。斜めにも進める。指を離すと、その道を一気に駆け抜ける。", demo: "route" },
+    { t: "ルートを描く", b: "主人公から指をすべらせて、進む道を描く。斜めにも進める。指を離して出撃ボタンで駆け抜ける。戦闘の最初のターンだけは、光る3つのマスのどれからでも出発できる。", demo: "route" },
     { t: "敵を切り抜ける", b: "道の途中に敵がいれば、通り抜けざまに斬る。倒しきれなかった敵は進行方向へ2マス押し出される。終点は空きマスで。", demo: "attack" },
     { t: "ウィークサイド", b: "盾に囲まれていない光る側面が弱点。矢印の方向からまっすぐ突っ込むと大ダメージ。", demo: "weak" },
     { t: "反撃", b: "盾のある側から上下左右にまっすぐ斬って、倒しきれないと反撃を受ける。斜めから斬れば反撃されない（弱点ボーナスもなし）。", demo: "guard" },

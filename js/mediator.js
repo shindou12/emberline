@@ -177,8 +177,33 @@
       v.combo.chain = 0; v.combo.alpha = 0;
       v.turnHUD.turn = B.turn; v.turnHUD.floor = this.floorText();
       v.objHUD.setObjectives(B.objectives);
+      v.board.starts = B.startLocked ? [] : (B.starts || []).slice();
       this.refreshBoardMarks();
       this.coolPreview();
+    }
+    /* opening: until the first route runs, the hero may start from any candidate spot */
+    startOpen() { return this.B && !this.B.startLocked && this.B.starts && this.B.starts.length > 1; }
+    startAt(d) {
+      if (!this.startOpen()) return null;
+      return this.B.starts.find((s) => { const c = tc(s.x, s.y); return (d.tile && sameTile(d.tile, s)) || Math.hypot(d.px - c.x, d.py - c.y) < V.GEO.T * 0.7; }) || null;
+    }
+    moveStart(s) {
+      const v = this.v, B = this.B;
+      if (sameTile(s, B.hero)) return;
+      B.hero = { x: s.x, y: s.y };
+      B.trail = [{ x: s.x, y: s.y }];
+      this.path = [{ x: s.x, y: s.y }];
+      v.footprints.trail = [{ x: s.x, y: s.y }];
+      v.board.heroTile = { x: s.x, y: s.y };
+      const p = feet(s);
+      v.hero.x = p.x; v.hero.y = p.y; v.hero.hop = 6; EL.tween(v.hero, { hop: 0 }, 160, { clock: "ui", ease: U.ease.outQuad });
+      this.compViews.forEach((u, i) => { u.x = p.x - 10 - i * 6; u.y = p.y - 2; });
+      v.fx.burst(p.x, p.y - 8, 10, { speed: [30, 100], life: [200, 400], palette: [C.emberL, C.ember], size: 2, glow: true, ay: -60 });
+      L.planTelegraphs(B);
+      this.refreshBoardMarks();
+      this.resetTurnHud();
+      this.coolPreview();
+      S.play("step", 1);
     }
     /* guard zones + announced strikes for a given enemy state (default: the battle's truth) */
     refreshBoardMarks(enemies, heroEnd) {
@@ -1148,7 +1173,8 @@
         v.hero.aura = 0; v.hero.shield = 0;
         this.coolPreview();
         v.route.pts = [];
-        this.hint(this.first ? "主人公から指でなぞってルートを描こう" : `ルートを描いて切り抜けろ — 残り${B.enemies.length}体`);
+        if (this.startOpen()) this.hint("光るマスのどれからでも、なぞって出発できる");
+        else this.hint(this.first ? "主人公から指でなぞってルートを描こう" : `ルートを描いて切り抜けろ — 残り${B.enemies.length}体`);
         // boxed in by embers? the oldest embers crumble until a way opens
         if (!L.canMove(B)) {
           const cooled = L.unstick(B);
@@ -1176,6 +1202,8 @@
         const d = evt.data, B = this.B;
         if (d.phase === "begin") {
           const hc = tc(B.hero.x, B.hero.y);
+          const spot = this.startAt(d);
+          if (spot) { this.moveStart(spot); this.go("Battle.Dragging"); return; }
           const grabbed = (d.tile && sameTile(d.tile, B.hero)) || Math.hypot(d.px - hc.x, d.py - hc.y) < V.GEO.T * 0.85;
           if (grabbed) { this.go("Battle.Dragging"); return; }
           this.tapTile = d.tile;
@@ -1240,7 +1268,9 @@
         if (evt.type !== "route.input" || d.phase !== "begin") return;
         const B = this.B, tip = this.route[this.route.length - 1];
         const near = (t) => { const c = tc(t.x, t.y); return Math.hypot(d.px - c.x, d.py - c.y) < V.GEO.T * 0.7; };
+        const spot = this.startAt(d);
         if (near(tip)) this.go("Battle.Dragging", this.route);
+        else if (spot) { this.setDragUI(false); this.moveStart(spot); this.go("Battle.Dragging"); }
         else if (near(B.hero)) this.go("Battle.Dragging");
       },
     },
@@ -1251,6 +1281,7 @@
         this.busy = true;
         this.setDragUI(false);
         this.hint("");
+        this.B.startLocked = true; v.board.starts = [];
         const res = await this.playRoute(route);
         L.commitRoute(this.B, this.run, route, res);
         this.syncAfterRoute();

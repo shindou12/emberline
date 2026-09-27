@@ -170,6 +170,26 @@
     return seen.size === floor;
   }
 
+  /* opening positions: up to three spots (left / centre / right) on the near rows,
+     never on a rock and never next to an enemy. The first is the default. */
+  function startCandidates(B) {
+    const out = [];
+    // Chebyshev distance from (x,y) to the nearest tile an enemy covers
+    const gap = (e, x, y) => Math.max(Math.abs(Math.max(e.x, Math.min(e.x + e.size - 1, x)) - x), Math.abs(Math.max(e.y, Math.min(e.y + e.size - 1, y)) - y));
+    const ok = (x, y) => !isRock(B, x, y) && !B.enemies.some((e) => e.alive && gap(e, x, y) <= 1);
+    for (const xs of [[3, 2, 4], [1, 0, 2], [5, 6, 4]]) {
+      let pick = null;
+      for (const y of [7, 6]) { for (const x of xs) if (ok(x, y)) { pick = { x, y }; break; } if (pick) break; }
+      if (pick && !out.some((t) => t.x === pick.x && t.y === pick.y)) out.push(pick);
+    }
+    if (!out.length) out.push({ x: 3, y: 7 });
+    return out;
+  }
+  function placeStart(B) {
+    B.starts = startCandidates(B);
+    B.hero = { x: B.starts[0].x, y: B.starts[0].y };
+    B.trail = [{ x: B.hero.x, y: B.hero.y }];
+  }
   function genBattle(run, node) {
     const rng = run.rng;
     const B = { w: BAL.GW, h: BAL.GH, tiles: new Array(BAL.GW * BAL.GH).fill(0), enemies: [], hero: { x: 3, y: 7 }, trail: [], turn: 1, kind: node.type, isBoss: node.type === "boss", phase2: false, uidSeq: 0, row: node.row, bst: { chain: 0, weak: 0, bumps: 0, multi: 0, guardHits: 0, friendly: 0 }, objectives: [] };
@@ -182,6 +202,7 @@
       B.enemies.push(makeEnemy(B, "husk", 0, 2, rng));
       B.enemies.push(makeEnemy(B, "husk", 6, 2, rng));
       B.enemies.push(makeEnemy(B, "wisp", 3, 4, rng));
+      placeStart(B);
       B.objectives = genObjectives(run, B);
       planTelegraphs(B);
       return B;
@@ -215,6 +236,7 @@
       if (!spot) break;
       B.enemies.push(makeEnemy(B, type, spot[0], spot[1], rng));
     }
+    placeStart(B);
     B.objectives = genObjectives(run, B);
     planTelegraphs(B);
     return B;
@@ -1000,7 +1022,7 @@
   }
 
   EL.Logic = {
-    CARD, CW, DIRS8, rngFrom, createRun, stats, genMap, nextNodes, genBattle,
+    CARD, CW, DIRS8, rngFrom, createRun, stats, genMap, nextNodes, genBattle, startCandidates,
     blockedSet, stepError, isWeakEntry, sealedBy, enemyAt, enemiesAt, covers, isRock, idx, inB,
     simulate, commitRoute, enemyPhase, genRewards, applyReward, heal, reachable, weakEntries,
     condReq, condProgress, pressureOf, enemyPressure, has, coolCount, canMove, unstick,
