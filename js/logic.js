@@ -261,14 +261,14 @@
     return inside;
   }
 
-  /* Guard zone (replaces counterattacks): the 8 neighbours of an enemy except
-     the ones on its weak side. Stepping in costs HP once per enemy per route. */
+  /* Guard zone (replaces counterattacks): the tiles orthogonally next to an
+     enemy's shielded sides. Stepping in costs HP once per enemy per route. */
   function inGuard(enemies, e, t) {
     if (!e.alive || e.tangled || e.atk <= 0) return false;
     if (covers(e, t.x, t.y)) return false;
     const nx = Math.max(e.x, Math.min(e.x + e.size - 1, t.x)), ny = Math.max(e.y, Math.min(e.y + e.size - 1, t.y));
     const dx = t.x - nx, dy = t.y - ny;
-    if (Math.max(Math.abs(dx), Math.abs(dy)) !== 1) return false;
+    if (Math.abs(dx) + Math.abs(dy) !== 1) return false; // orthogonal sides only: diagonals are a safe, plain approach
     if (sealedBy(enemies, e)) return true;
     const w = CARD[e.weak];
     return dx * w[0] + dy * w[1] <= 0;

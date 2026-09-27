@@ -1642,7 +1642,7 @@
     { t: "ルートを描く", b: "主人公から指をすべらせて、進む道を描く。斜めにも進める。指を離すと、その道を一気に駆け抜ける。", demo: "route" },
     { t: "敵を切り抜ける", b: "道の途中に敵がいれば、通り抜けざまに斬る。倒しきれなかった敵は進行方向へ2マス押し出される。終点は空きマスで。", demo: "attack" },
     { t: "ウィークサイド", b: "盾に囲まれていない光る側面が弱点。矢印の方向からまっすぐ突っ込むと大ダメージ。", demo: "weak" },
-    { t: "警戒", b: "敵の盾側のまわり（点線のマス）は警戒エリア。踏み込むと敵1体につき1回ダメージ。弱点側からなら警戒されない。", demo: "guard" },
+    { t: "警戒", b: "敵の盾側の上下左右（点線のマス）は警戒エリア。踏み込むと敵1体につき1回ダメージ。斜めのマスは安全（ただし弱点ボーナスもなし）。", demo: "guard" },
     { t: "押し出しともつれ", b: "押された敵は壁・足跡・敵にぶつかると衝突ダメージ。敵にぶつかると同じマスに絡まり「もつれ」になる（移動+1）。もつれは警戒せず、斬れば全員が弱点ダメージ。", demo: "push" },
     { t: "攻撃予告", b: "赤いマスは次の敵ターンに攻撃が来る場所。そこで終わると被弾。敵を押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
     { t: "撃破で移動回復", b: "敵を倒すたびに移動力が回復する。倒して、進んで、また倒す。長い連鎖が勝利への近道。", demo: "chain" },
@@ -1699,16 +1699,16 @@
       const fl = Math.floor(t / 200) % 2;
       if (kind === "guard") {
         const e = cell(3, 2);
-        for (let y = 1; y <= 3; y++) for (let x = 2; x <= 4; x++) {
-          if ((x === 3 && y === 2) || y === 3) continue;
+        for (const [x, y] of [[3, 1], [2, 2], [4, 2]]) {
           const c = cell(x, y);
           ctx.fillStyle = "#ff6a9a";
           for (let i = 0; i < 32; i += 8) { ctx.fillRect(c.x - 16 + i, c.y - 16, 4, 2); ctx.fillRect(c.x - 16 + i, c.y + 14, 4, 2); ctx.fillRect(c.x - 16, c.y - 16 + i, 2, 4); ctx.fillRect(c.x + 14, c.y - 16 + i, 2, 4); }
         }
-        for (let x = 2; x <= 4; x++) { const c = cell(x, 3); ctx.globalAlpha = 0.5; A.dither(ctx, c.x - 14, c.y - 14, 28, 28, C.weak, fl); ctx.globalAlpha = 1; }
+        { const c = cell(3, 3); ctx.globalAlpha = 0.5; A.dither(ctx, c.x - 14, c.y - 14, 28, 28, C.weak, fl); ctx.globalAlpha = 1; }
         A.spr(ctx, "shield", e.x, e.y + 16, { s: 2 });
         ctx.fillStyle = C.weak; ctx.fillRect(e.x - 14, e.y + 16, 28, 4);
-        A.text(ctx, "-2", cell(2, 1).x, cell(2, 1).y - 6, { s: 2, align: "center", color: "#ffb0c8" });
+        A.text(ctx, "-2", cell(2, 2).x, cell(2, 2).y - 6, { s: 2, align: "center", color: "#ffb0c8" });
+        for (const [x, y] of [[2, 1], [4, 1], [2, 3], [4, 3]]) A.text(ctx, "OK", cell(x, y).x, cell(x, y).y - 4, { s: 1, align: "center", color: C.dim });
         A.text(ctx, "OK", cell(3, 3).x, cell(3, 3).y - 6, { s: 2, align: "center", color: C.heal });
       }
       if (kind === "push") {
