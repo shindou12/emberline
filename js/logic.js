@@ -446,6 +446,7 @@
       let refund = stats(run, T.hp).refund - (T.kills > 1 ? BAL.refundDecay : 0);
       let bonusHeal = 0;
       if (has(run, "chain") && T.chain >= 3) { refund += 1; bonusHeal = 1; }
+      if (has(run, "rope") && e.tangled) refund += 1;
       T.moves += refund;
       push({ type: "kill", uid: e.uid, refund, chain: T.chain, moves: T.moves, src, x: e.x, y: e.y, size: e.size });
       if (bonusHeal) heal(bonusHeal);
@@ -505,14 +506,13 @@
       rec.pushes.push({ uid: e.uid, from, path, stop, dir: d, bump: stop ? bump : 0 });
       if (!stop) return path.length > 0;
       T.bumps++;
-      if (stop === "tangle") {
-        T.tangles++;
-        const members = enemiesAt(st.enemies, e.x, e.y);
-        members.forEach((m) => (m.tangled = true));
-        const gain = BAL.tangleRefund + (has(run, "rope") ? 1 : 0);
-        T.moves += gain;
-        push({ type: "tangle", uid: e.uid, x: e.x, y: e.y, uids: members.map((m) => m.uid), gain, moves: T.moves });
-      }
+      // whatever it slams into (wall, rock, embers, another enemy) leaves it tangled:
+      // no counterattack, weak-side damage from any hit, and the hit unties it
+      T.tangles++;
+      const members = stop === "tangle" ? enemiesAt(st.enemies, e.x, e.y) : [e];
+      if (stop === "full" && other[0] && !other[0].boss) members.push(other[0]);
+      members.forEach((m) => (m.tangled = true));
+      push({ type: "tangle", uid: e.uid, x: e.x, y: e.y, uids: members.map((m) => m.uid), pile: stop === "tangle", reason: stop });
       const extra = stop === "ember" && has(run, "emberhand") ? 2 : 0;
       damage(e, bump + extra, "bump", rec, { reason: stop });
       if (stop === "tangle" || stop === "full" || stop === "boss") {
@@ -636,17 +636,23 @@
         const base = S.atk + bonus;
         const tangled = hereE.length > 1 || hereE.some((e) => e.tangled);
         if (tangled) {
-          // a tangled pile has no guard: every body in it takes a weak-side hit
+          // a tangle has no guard: every tangled body takes a weak-side hit, and the hit unties it
           let killed = 0;
+          const untied = [];
           for (const e of hereE) {
             if (!e.alive || done) continue;
-            T.hitCount[e.uid] = (T.hitCount[e.uid] || 0) + 1; // a tangle can always be cashed in
+            T.hitCount[e.uid] = (T.hitCount[e.uid] || 0) + 1;
+            if (!e.tangled) continue; // already cashed in this route
+            untied.push(e);
             const dmg = Math.floor(base * S.weakMult);
             T.weakHits++; T.attacks++;
             rec.attacks.push({ uid: e.uid, dmg, weak: true, tangle: true, kill: e.hp - dmg <= 0 });
             damage(e, dmg, "hero", rec, { weak: true, tangle: true, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
             if (!e.alive) killed++;
           }
+          untied.forEach((m) => (m.tangled = false));
+          const still = untied.filter((m) => m.alive);
+          if (still.length) push({ type: "untie", uids: still.map((m) => m.uid) });
           T.multi = Math.max(T.multi, killed);
         } else {
           const e = hereE[0];

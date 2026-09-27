@@ -530,18 +530,19 @@
         ctx.fillStyle = "#ffd35a"; ctx.fillRect(c.x + d[0] * 6 - 3, c.y + d[1] * 6 - 3, 6, 6);
       }
       if (!p.stop) continue;
-      if (p.stop === "tangle") {
-        const bob = f * 2;
-        ctx.fillStyle = C.ink; ctx.fillRect(c.x - 12, c.y - 30 - bob, 24, 16);
-        ctx.fillStyle = "#b08cff"; ctx.fillRect(c.x - 10, c.y - 28 - bob, 20, 12);
-        A.jp(ctx, "絡", c.x, c.y - 31 - bob, { size: 12, align: "center", color: C.cream, ow: 1 });
-      } else {
+      if (p.stop !== "tangle") {
         // impact star just past the end of the slide
         const sx = c.x + d[0] * 22, sy = c.y + d[1] * 22;
         const r = 5 + f * 2;
         ctx.fillStyle = C.ink; ctx.fillRect(sx - r - 1, sy - 2, r * 2 + 2, 4); ctx.fillRect(sx - 2, sy - r - 1, 4, r * 2 + 2);
         ctx.fillStyle = "#fff6df"; ctx.fillRect(sx - r, sy - 1, r * 2, 2); ctx.fillRect(sx - 1, sy - r, 2, r * 2);
         ctx.fillStyle = "#ffd35a"; ctx.fillRect(sx - 3, sy - 3, 6, 6);
+      }
+      {
+        const bob = f * 2;
+        ctx.fillStyle = C.ink; ctx.fillRect(c.x - 12, c.y - 30 - bob, 24, 16);
+        ctx.fillStyle = "#b08cff"; ctx.fillRect(c.x - 10, c.y - 28 - bob, 20, 12);
+        A.jp(ctx, "絡", c.x, c.y - 31 - bob, { size: 12, align: "center", color: C.cream, ow: 1 });
       }
       if (p.bump) {
         const bx = c.x - 11, by = c.y + 8;
@@ -1673,7 +1674,7 @@
     { t: "ウィークサイド", b: "盾に囲まれていない光る側面が弱点。矢印の方向からまっすぐ突っ込むと大ダメージ。", demo: "weak" },
     { t: "反撃", b: "盾のある側から上下左右にまっすぐ斬って、倒しきれないと反撃を受ける。斜めから斬れば反撃されない（弱点ボーナスもなし）。", demo: "guard" },
     { t: "結界柱", b: "結界柱のまわり2マス（紫の枠）にいる敵は弱点が消える。柱を倒すか、敵を枠の外へ押し出せば、ルートの途中でもすぐ弱点が戻る。", demo: "seal" },
-    { t: "押し出しともつれ", b: "押された敵は壁・岩・敵にぶつかると衝突ダメージ。残りの移動が多いほど強くぶつかる。1ルートで同じ敵を2回目以降に斬ると、ダメージなしで押すだけ（ボスともつれは例外）。敵にぶつかると同じマスに絡まり「もつれ」になる（移動+1）。もつれた敵は反撃せず、斬れば全員が弱点ダメージ。", demo: "push" },
+    { t: "押し出しともつれ", b: "押された敵が壁・岩・足跡・敵にぶつかると衝突ダメージ（残り移動が多いほど強い）を受け「もつれ」る。もつれた敵は反撃せず、斬れば弱点ダメージ（斬るとほどける）。敵同士は同じマスに重なる。同じ敵を2回目以降に斬ると押すだけ。", demo: "push" },
     { t: "岩と壁", b: "岩はマスごと塞ぐが、岩と岩の斜めのすき間は通れる。石の壁はマスの辺だけを塞ぐ。壁ごしには進めず、押された敵も壁で止まる。", demo: "wall" },
     { t: "攻撃予告", b: "骨砕きとボスは、次の敵ターンに攻撃するマスを赤く予告する。そこで終わると被弾。押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
     { t: "撃破で移動回復", b: "敵を倒すと移動力が回復する（1ルートで最初の撃破は+2、2体目からは+1）。倒して、進んで、また倒す。長い連鎖が勝利への近道。", demo: "chain" },
@@ -1750,7 +1751,7 @@
         ctx.fillStyle = "#ffd35a"; A.pline(ctx, cell(2, 4).x, cell(2, 4).y, cell(4, 4).x, cell(4, 4).y, 3);
         A.spr(ctx, "wisp", other.x + (ex >= 4 ? 8 : 0), other.y + 16, { s: 2 });
         A.spr(ctx, "husk", me.x - (ex >= 4 ? 8 : 0), me.y + 16, { s: 2 });
-        if (ex >= 4) { ctx.fillStyle = "#b08cff"; ctx.fillRect(other.x - 16, other.y + 4, 32, 4); A.jp(ctx, "もつれ！ 移動+1", other.x - 20, other.y - 48, { size: 16, align: "center", color: "#e9dcff" }); }
+        if (ex >= 4) { ctx.fillStyle = "#b08cff"; ctx.fillRect(other.x - 16, other.y + 4, 32, 4); A.jp(ctx, "もつれ！", other.x - 20, other.y - 48, { size: 16, align: "center", color: "#e9dcff" }); }
         A.spr(ctx, "kai", hero.x, hero.y + 16, { s: 2 });
       }
       if (kind === "wall") {

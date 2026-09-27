@@ -8,7 +8,6 @@
     pushDist: 2, // survivors are shoved this many tiles along your line
     tangleMax: 3, // enemies that can pile into one tile
     bump: 1, bumpPerMove: 1 / 3, // collision damage = bump + floor(moves left × bumpPerMove)
-    tangleRefund: 1,
     refundDecay: 1, // kills after the first in a route refund this much less // moves regained for creating a tangle
     coolMin: 2, // embers always cool at least this many tiles per turn
     sealRange: 2, // ward pillar: enemies within this many tiles lose their weak side
@@ -80,13 +79,13 @@
   };
 
   const ENEMIES = {
-    husk: { name: "殻喰い", sprite: "husk", hp: 8, atk: 1, pressure: 1, ai: "chase", desc: "近づいてくる。背中（弱点）を向けて歩く。" },
+    husk: { name: "殻喰い", sprite: "husk", hp: 9, atk: 1, pressure: 1, ai: "chase", desc: "近づいてくる。背中（弱点）を向けて歩く。" },
     wisp: { name: "鬼火", sprite: "wisp", hp: 5, atk: 0, pressure: 2, rotates: true, ai: "static", desc: "脆いが夜の圧が強い。弱点が毎ターン回る。" },
-    shield: { name: "盾持ち", sprite: "shield", hp: 12, atk: 2, pressure: 1, ai: "static", desc: "硬く、反撃が痛い。背後を狙え。" },
-    caller: { name: "呼び声", sprite: "caller", hp: 7, atk: 1, pressure: 1, summons: true, ai: "flee", desc: "逃げ回りながら殻喰いを呼ぶ。" },
-    totem: { name: "結界柱", sprite: "totem", hp: 9, atk: 0, pressure: 1, seals: true, ai: "static", desc: "周囲2マスの敵の弱点を封じる。倒すか、範囲の外へ押し出せば弱点が戻る。" },
-    brute: { name: "骨砕き", sprite: "brute", hp: 16, atk: 3, pressure: 2, ai: "slow", tele: "cross", teleDmg: 5, desc: "2ターンに1歩。十字に大槌を振り下ろす。" },
-    boss: { name: "灰冠の王ヴォルグ", sprite: "boss", hp: 60, atk: 2, pressure: 4, size: 2, boss: true, ai: "static", tele: "boss", teleDmg: 4, desc: "深層の主。弱点は毎ターン巡り、灰の波で列を薙ぐ。押し出せない。" },
+    shield: { name: "盾持ち", sprite: "shield", hp: 13, atk: 2, pressure: 1, ai: "static", desc: "硬く、反撃が痛い。背後を狙え。" },
+    caller: { name: "呼び声", sprite: "caller", hp: 8, atk: 1, pressure: 1, summons: true, ai: "flee", desc: "逃げ回りながら殻喰いを呼ぶ。" },
+    totem: { name: "結界柱", sprite: "totem", hp: 10, atk: 0, pressure: 1, seals: true, ai: "static", desc: "周囲2マスの敵の弱点を封じる。倒すか、範囲の外へ押し出せば弱点が戻る。" },
+    brute: { name: "骨砕き", sprite: "brute", hp: 17, atk: 3, pressure: 2, ai: "slow", tele: "cross", teleDmg: 5, desc: "2ターンに1歩。十字に大槌を振り下ろす。" },
+    boss: { name: "灰冠の王ヴォルグ", sprite: "boss", hp: 66, atk: 2, pressure: 4, size: 2, boss: true, ai: "static", tele: "boss", teleDmg: 4, desc: "深層の主。弱点は毎ターン巡り、灰の波で列を薙ぐ。押し出せない。" },
   };
 
   /* Relics change *how* you draw routes, not just numbers. */
@@ -113,7 +112,7 @@
     lantern: { name: "大灯籠", rarity: 1, icon: "r_lantern", desc: "攻撃+1。ただし足跡の長さ+4。" },
     brawn: { name: "剛腕", rarity: 1, icon: "r_gauntlet", desc: "押し出しが1マス伸びる。" },
     impact: { name: "衝撃の鋲", rarity: 1, icon: "r_sigil", desc: "衝突ダメージが2倍になる。" },
-    rope: { name: "絡め縄", rarity: 2, icon: "r_chain", desc: "もつれを作ると移動+2（通常+1）。もつれは4体まで重なる。" },
+    rope: { name: "絡め縄", rarity: 2, icon: "r_chain", desc: "もつれた敵を倒すと移動+1。もつれは4体まで重なる。" },
     shade: { name: "影歩き", rarity: 1, icon: "r_plume", desc: "各ターン最初の反撃を無効化する。" },
     emberhand: { name: "燠の手", rarity: 1, icon: "r_scorch", desc: "燃える足跡に押し込んだ敵に+2ダメージ。" },
   };

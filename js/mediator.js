@@ -416,7 +416,7 @@
       else if (res.endBlocked) this.hint("敵のマスでは止まれない");
       else if (res.outcome === "victory") this.hint("このルートで全滅できる！");
       else if (res.teleEnd > 0) this.hint(`終点に攻撃予告！ −${res.teleEnd}`);
-      else if (res.T.tangles > 0 && !kills) this.hint("もつれた！ 斬れば全員に弱点ダメージ");
+      else if (res.T.tangles > 0 && !kills) this.hint("もつれた！ 斬れば弱点ダメージ（斬るとほどける）");
       else if (guardDmg > 0) this.hint(`反撃 −${guardDmg} — 弱点か斜めから斬れば反撃されない`);
       else if (skills) this.hint("仲間の能力が発動する！");
       else if (kills) this.hint(kills === 1 ? `撃破で移動+${L.stats(run).refund} — まだ伸ばせる` : "2体目以降の撃破は移動+1 — 目標を見極めて");
@@ -583,6 +583,16 @@
       this.layoutStacks();
       this.liveSeals();
     }
+    async ev_untie(ev) {
+      for (const uid of ev.uids) {
+        const w = this.enemyViews[uid];
+        if (!w || w.dead) continue;
+        w.tangled = false;
+        const r = w.rect();
+        this.v.fx.burst(r.x + r.s / 2, r.y + r.s / 2, 8, { speed: [30, 100], life: [200, 400], palette: ["#b08cff", "#e9dcff"], size: 2 });
+      }
+      this.layoutStacks();
+    }
     async ev_bump(ev) {
       const v = this.v, evw = this.enemyViews[ev.uid];
       if (!evw) return;
@@ -608,7 +618,7 @@
       const c = tc(ev.x, ev.y);
       v.fx.ring(c.x, c.y, 34, "#b08cff", 360, 4);
       v.floats.spawn("もつれ！", c.x, c.y - 44, { kind: "jp", color: "#e9dcff", life: 900, vy: -30 });
-      if (ev.gain) { v.floats.spawn("+" + ev.gain + " MOVE", c.x, c.y + 20, { s: 2, color: C.heal, life: 900, vy: -24 }); this.flyOrb(c.x, c.y, ev.moves); v.moveHUD.moves = ev.moves; }
+
       S.play("chime");
       await EL.wait(160);
       this.refreshObjectives();
