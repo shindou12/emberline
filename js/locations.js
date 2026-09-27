@@ -54,8 +54,8 @@
       const px = (c, x, y, w = 1, h = 1) => { g.fillStyle = c; g.fillRect(x, y, w, h); };
       if (style === "slab") return A.TILES; // the original temple floor
       if (style === "grass") {
-        px("#16281c", 0, 0, 24, 24); px("#1c3322", 1, 1, 22, 22);
-        for (let i = 0; i < 26; i++) { const x = 1 + Math.floor(rnd() * 22), y = 2 + Math.floor(rnd() * 21); px(rnd() < 0.5 ? "#2a4a2c" : "#244029", x, y, 1, 2); }
+        px("#1c3322", 0, 0, 24, 24); px("#244029", 1, 1, 22, 22);
+        for (let i = 0; i < 26; i++) { const x = 1 + Math.floor(rnd() * 22), y = 2 + Math.floor(rnd() * 21); px(rnd() < 0.5 ? "#33583a" : "#2c4c31", x, y, 1, 2); }
         for (let i = 0; i < 6; i++) px("#3c6636", 2 + Math.floor(rnd() * 20), 2 + Math.floor(rnd() * 20), 1, 1);
         if (v === 1) { px("#2a2418", 8, 9, 5, 2); px("#2a2418", 7, 10, 3, 2); px("#342d1e", 9, 9, 2, 1); px("#4a4032", 14, 15, 2, 1); px("#4a4032", 5, 16, 1, 1); }
         if (v === 2) { px("#c9b3ff", 16, 6, 1, 1); px("#fff6df", 5, 17, 1, 1); px("#ffd35a", 12, 13, 1, 1); }
@@ -66,8 +66,8 @@
           const off = row % 2 ? 6 : 0;
           for (let b = -1; b < 3; b++) {
             const x = b * 12 + off, y = row * 6;
-            const c = ["#223036", "#26363c", "#1e2b30"][Math.floor(rnd() * 3)];
-            px(c, x + 1, y + 1, 10, 4); px("#2e4046", x + 1, y + 1, 10, 1);
+            const c = ["#2a3c42", "#2f444b", "#26363c"][Math.floor(rnd() * 3)];
+            px(c, x + 1, y + 1, 10, 4); px("#3a5058", x + 1, y + 1, 10, 1);
           }
         }
         if (v === 1) { px("#16323e", 4, 9, 12, 5); px("#24506a", 6, 10, 6, 1); px("#7fd8ff", 8, 10, 2, 1); }
@@ -75,8 +75,8 @@
       } else if (style === "cobble") {
         px("#161216", 0, 0, 24, 24);
         for (let y = 0; y < 24; y += 6) for (let x = (y / 6) % 2 ? -3 : 0; x < 24; x += 6) {
-          const c = ["#3a3034", "#342b30", "#40363a"][Math.floor(rnd() * 3)];
-          px(c, x + 1, y + 1, 5, 4); px("#4c4044", x + 1, y + 1, 4, 1); px("#2a2226", x + 1, y + 4, 5, 1);
+          const c = ["#463a3e", "#40353a", "#4c4044"][Math.floor(rnd() * 3)];
+          px(c, x + 1, y + 1, 5, 4); px("#5a4c50", x + 1, y + 1, 4, 1); px("#2a2226", x + 1, y + 4, 5, 1);
         }
         if (v === 1) { px("#2a1c14", 9, 10, 6, 3); px("#ff8a2a", 11, 11, 1, 1); }
         if (v === 2) { px("#1d1a2a", 3, 15, 8, 3); px("#2c2a44", 4, 15, 5, 1); }
@@ -227,37 +227,37 @@
       name: "地下神殿", tiles: tiles("slab"), obstacles: ["rock"], back: BACK.temple, corner: "brazier",
       frame: ["#2b2140", "#4a3a66", "#171125"],
       bg: { top: "#08060f", mid: "#150f24", bot: "#211634", mote: ["#ff8a2a", "#c24a12", "#5a5078"], up: true },
-      light: { ambient: "#8580b2", shaft: "255,210,150", shaftA: 0.045, corner: "255,150,70", bokeh: ["255,160,80", "180,150,255"] },
+      light: { ambient: "#aaa4d0", shaft: "255,210,150", shaftA: 0.045, corner: "255,150,70", bokeh: ["255,160,80", "180,150,255"] },
     },
     forest: {
       name: "夜の森", tiles: tiles("grass"), obstacles: ["o_bush", "o_stump", "o_mossrock"], back: BACK.forest, corner: "lantern",
       frame: ["#1e2a1c", "#3a5234", "#101a12"],
       bg: { top: "#040a0a", mid: "#0c1c18", bot: "#15301f", mote: ["#c8f07a", "#8fe07a", "#ffe9a8"], up: true, deco: BG.forest },
-      light: { ambient: "#7c9c90", shaft: "190,230,255", shaftA: 0.05, corner: "255,190,100", bokeh: ["190,255,140", "255,230,150"] },
+      light: { ambient: "#a8c6ba", shaft: "190,230,255", shaftA: 0.05, corner: "255,190,100", bokeh: ["190,255,140", "255,230,150"] },
     },
     tunnel: {
       name: "地下水路", tiles: tiles("brick"), obstacles: ["o_rubble", "o_crate", "o_barrel"], back: BACK.tunnel, corner: "torch",
       frame: ["#1c2628", "#34484e", "#0e1416"],
       bg: { top: "#040608", mid: "#0a1216", bot: "#122028", mote: ["#7fd8ff", "#3478e0"], up: false, deco: BG.tunnel },
-      light: { ambient: "#627a86", shaft: "150,220,255", shaftA: 0.025, corner: "120,230,240", bokeh: ["120,200,255", "150,255,230"] },
+      light: { ambient: "#90aab6", shaft: "150,220,255", shaftA: 0.025, corner: "120,230,240", bokeh: ["120,200,255", "150,255,230"] },
     },
     city: {
       name: "燃える市街", tiles: tiles("cobble"), obstacles: ["o_barrel", "o_crate", "o_barrel"], back: BACK.city, corner: "lamp",
       frame: ["#2a2226", "#4c4044", "#161216"],
       bg: { top: "#060818", mid: "#141836", bot: "#2e1a2c", mote: ["#ff8a2a", "#ffd35a", "#c24a12"], up: true, deco: BG.city },
-      light: { ambient: "#7e82aa", shaft: "255,160,90", shaftA: 0.03, corner: "255,215,140", bokeh: ["255,150,70", "255,210,120"] },
+      light: { ambient: "#a8aad0", shaft: "255,160,90", shaftA: 0.03, corner: "255,215,140", bokeh: ["255,150,70", "255,210,120"] },
     },
     vista: {
       name: "黄昏の崖", tiles: tiles("sand"), obstacles: ["o_column", "o_boulder"], back: BACK.vista, corner: "brazier",
       frame: ["#3a2a26", "#6a4a3e", "#221816"],
       bg: { top: "#1e1236", mid: "#8a3e5e", bot: "#e08a58", mote: ["#ffd0a0", "#ffb0c8", "#fff6df"], up: false, deco: BG.vista },
-      light: { ambient: "#c4a2a2", shaft: "255,200,140", shaftA: 0.085, corner: "255,170,90", bokeh: ["255,200,150", "255,170,200"] },
+      light: { ambient: "#e6cac4", shaft: "255,200,140", shaftA: 0.085, corner: "255,170,90", bokeh: ["255,200,150", "255,170,200"] },
     },
   };
   L.boss = Object.assign({}, L.temple, {
     name: "灰冠の玉座",
     bg: { top: "#0c0409", mid: "#220915", bot: "#3b0c1c", mote: ["#ff4d5e", "#ff8a2a", "#7af0ff"], up: true },
-    light: { ambient: "#8e6680", shaft: "255,120,120", shaftA: 0.045, corner: "255,150,70", bokeh: ["255,110,90", "180,150,255"] },
+    light: { ambient: "#b08aa0", shaft: "255,120,120", shaftA: 0.045, corner: "255,150,70", bokeh: ["255,110,90", "180,150,255"] },
   });
   L.get = (id) => L[id] || L.temple;
   L.corner = corner;

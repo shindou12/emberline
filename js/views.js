@@ -993,8 +993,8 @@
       }
       ctx.restore();
       // 4. vignette
-      const vg = ctx.createRadialGradient(180, 300, 120, 180, 300, 420);
-      vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(4,2,10,0.6)");
+      const vg = ctx.createRadialGradient(180, 300, 160, 180, 300, 460);
+      vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(4,2,10,0.42)");
       ctx.fillStyle = vg;
       ctx.fillRect(0, 0, 360, 640);
     }
