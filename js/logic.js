@@ -133,26 +133,6 @@
   const covers = (e, x, y) => x >= e.x && y >= e.y && x < e.x + e.size && y < e.y + e.size;
   const enemyAt = (enemies, x, y) => enemies.find((e) => e.alive && covers(e, x, y)) || null;
 
-  /* edge walls: thin walls on the border between two tiles.
-     Stored as "x,y,R" (between x,y and x+1,y) or "x,y,D" (between x,y and x,y+1). */
-  function wallBetween(B, a, b) {
-    if (!B.walls || !B.walls.size) return false;
-    if (b.x === a.x + 1 && b.y === a.y) return B.walls.has(a.x + "," + a.y + ",R");
-    if (b.x === a.x - 1 && b.y === a.y) return B.walls.has(b.x + "," + b.y + ",R");
-    if (b.y === a.y + 1 && b.x === a.x) return B.walls.has(a.x + "," + a.y + ",D");
-    if (b.y === a.y - 1 && b.x === a.x) return B.walls.has(b.x + "," + b.y + ",D");
-    return false;
-  }
-  /* can something move a→b (one step, 8-dir)? Rocks never pinch a diagonal;
-     walls block a diagonal only when they cut both ways around the corner. */
-  function passable(B, a, b) {
-    if (a.x === b.x || a.y === b.y) return !wallBetween(B, a, b);
-    const c1 = { x: b.x, y: a.y }, c2 = { x: a.x, y: b.y };
-    const cut1 = wallBetween(B, a, c1) || wallBetween(B, c1, b);
-    const cut2 = wallBetween(B, a, c2) || wallBetween(B, c2, b);
-    return !(cut1 && cut2);
-  }
-
   function makeEnemy(B, type, x, y, rng) {
     const d = D.ENEMIES[type];
     const e = { uid: ++B.uidSeq, type, x, y, size: d.size || 1, hp: d.hp, maxHp: d.hp, atk: d.atk, pressure: d.pressure, weak: "D", alive: true, boss: !!d.boss, tangled: false, tele: null };
@@ -165,8 +145,7 @@
       for (let k = 0; k < e.size; k++) {
         const tx = dx === 0 ? e.x + k : dx > 0 ? e.x + e.size : e.x - 1;
         const ty = dy === 0 ? e.y + k : dy > 0 ? e.y + e.size : e.y - 1;
-        const ex = dx === 0 ? tx : dx > 0 ? tx - 1 : tx + 1, ey = dy === 0 ? ty : dy > 0 ? ty - 1 : ty + 1;
-        if (!isRock(B, tx, ty) && !wallBetween(B, { x: ex, y: ey }, { x: tx, y: ty })) return true;
+        if (!isRock(B, tx, ty)) return true;
       }
       return false;
     });
@@ -182,7 +161,7 @@
       const [x, y] = q.shift();
       for (const [dx, dy] of DIRS8.filter((d) => d[0] === 0 || d[1] === 0)) {
         const nx = x + dx, ny = y + dy;
-        if (isRock(B, nx, ny) || seen.has(idx(B, nx, ny)) || wallBetween(B, { x, y }, { x: nx, y: ny })) continue;
+        if (isRock(B, nx, ny) || seen.has(idx(B, nx, ny))) continue;
         seen.add(idx(B, nx, ny)); q.push([nx, ny]);
       }
     }
@@ -193,7 +172,7 @@
 
   function genBattle(run, node) {
     const rng = run.rng;
-    const B = { w: BAL.GW, h: BAL.GH, tiles: new Array(BAL.GW * BAL.GH).fill(0), walls: new Set(), enemies: [], hero: { x: 3, y: 7 }, trail: [], turn: 1, kind: node.type, isBoss: node.type === "boss", phase2: false, uidSeq: 0, row: node.row, bst: { chain: 0, weak: 0, bumps: 0, multi: 0, guardHits: 0, friendly: 0 }, objectives: [] };
+    const B = { w: BAL.GW, h: BAL.GH, tiles: new Array(BAL.GW * BAL.GH).fill(0), enemies: [], hero: { x: 3, y: 7 }, trail: [], turn: 1, kind: node.type, isBoss: node.type === "boss", phase2: false, uidSeq: 0, row: node.row, bst: { chain: 0, weak: 0, bumps: 0, multi: 0, guardHits: 0, friendly: 0 }, objectives: [] };
     B.trail = [{ x: 3, y: 7 }];
     if (B.isBoss) {
       for (const [x, y] of [[0, 4], [6, 4], [1, 0], [5, 0]]) B.tiles[idx(B, x, y)] = 1;
@@ -208,34 +187,13 @@
       return B;
     }
     // rocks
-    B.walls = new Set();
-    const nRocks = ri(rng, 1, 3);
+    const nRocks = ri(rng, 2, 4);
     for (let tries = 0, placed = 0; placed < nRocks && tries < 200; tries++) {
       const x = ri(rng, 0, B.w - 1), y = ri(rng, 0, 6);
       if (Math.abs(x - 3) <= 1 && y >= 6) continue;
       if (B.tiles[idx(B, x, y)]) continue;
       B.tiles[idx(B, x, y)] = 1;
       if (!connected(B, 3, 7)) { B.tiles[idx(B, x, y)] = 0; continue; }
-      placed++;
-    }
-    // edge walls: short straight runs (1-2 edges), sometimes bent into an L
-    const nWalls = ri(rng, 2, 4);
-    for (let tries = 0, placed = 0; placed < nWalls && tries < 200; tries++) {
-      const vert = rng() < 0.5;
-      const x = ri(rng, 0, B.w - (vert ? 2 : 1)), y = ri(rng, 0, vert ? 6 : 5);
-      const len = rng() < 0.45 ? 2 : 1;
-      const keys = [];
-      for (let k = 0; k < len; k++) keys.push(vert ? `${x},${y + k},R` : `${x + k},${y},D`);
-      if (rng() < 0.3) keys.push(vert ? `${x},${y},D` : `${x},${y},R`);
-      const ok = keys.every((k) => {
-        const [kx, ky, d] = k.split(","); const X = +kx, Y = +ky;
-        if (d === "R" ? X >= B.w - 1 : Y >= B.h - 1) return false;
-        if (Y >= 6 && Math.abs(X - 3) <= 1) return false; // keep the start open
-        return !B.walls.has(k);
-      });
-      if (!ok) continue;
-      keys.forEach((k) => B.walls.add(k));
-      if (!connected(B, 3, 7)) { keys.forEach((k) => B.walls.delete(k)); continue; }
       placed++;
     }
     // enemies
@@ -278,7 +236,6 @@
     const dx = b.x - a.x, dy = b.y - a.y;
     if (Math.max(Math.abs(dx), Math.abs(dy)) !== 1) return "far";
     if (isRock(B, b.x, b.y)) return "rock";
-    if (!passable(B, a, b)) return "wall";
     if (blocked.has(idx(B, b.x, b.y))) return "ember";
     if (moves < 1) return "moves";
     return "";
@@ -321,13 +278,12 @@
     if (!sx && !sy) sy = 1;
     const tiles = [];
     switch (d.tele) {
-      case "adjacent": if (passable(B, e, { x: e.x + sx, y: e.y + sy })) tiles.push([sx, sy]); break;
+      case "adjacent": tiles.push([sx, sy]); break;
       case "line": {
         const alongX = Math.abs(h.x - cx) >= Math.abs(h.y - cy);
         const dx = alongX ? sx || 1 : 0, dy = alongX ? 0 : sy || 1;
         for (let k = 1; k <= 3; k++) {
-          const p0 = { x: e.x + dx * (k - 1), y: e.y + dy * (k - 1) }, p1 = { x: e.x + dx * k, y: e.y + dy * k };
-          if (isRock(B, p1.x, p1.y) || wallBetween(B, p0, p1)) break;
+          if (isRock(B, e.x + dx * k, e.y + dy * k)) break;
           tiles.push([dx * k, dy * k]);
         }
         break;
@@ -477,7 +433,7 @@
       rec.guards.push({ uid: e.uid, dmg });
       heroHurt(dmg, e);
     }
-    /* shove a survivor along the line of travel; walls, embers and bodies stop it.
+    /* shove a survivor along the line of travel; rocks, the board edge, embers and bodies stop it.
        Returns true when it actually slid. */
     function shove(e, d, rec) {
       if (e.boss || e.size > 1) return false;
@@ -487,7 +443,7 @@
       let stop = null, other = [];
       for (let k = 0; k < n; k++) {
         const t = { x: e.x + d[0], y: e.y + d[1] };
-        if (isRock(B, t.x, t.y) || !passable(B, e, t)) { stop = "wall"; break; }
+        if (isRock(B, t.x, t.y)) { stop = "wall"; break; }
         if (ember.has(idx(B, t.x, t.y))) { stop = "ember"; break; }
         const occ = enemiesAt(st.enemies, t.x, t.y).filter((o) => o !== e);
         if (occ.length) {
@@ -732,7 +688,7 @@
       const [x, y] = q.shift();
       for (const [dx, dy] of DIRS8) {
         const nx = x + dx, ny = y + dy;
-        if (!inB(B, nx, ny) || seen.has(idx(B, nx, ny)) || isRock(B, nx, ny) || !passable(B, { x, y }, { x: nx, y: ny })) continue;
+        if (!inB(B, nx, ny) || seen.has(idx(B, nx, ny)) || isRock(B, nx, ny)) continue;
         seen.add(idx(B, nx, ny));
         if (freeFor(B, nx, ny, self, ember)) return { x: nx, y: ny };
         q.push([nx, ny]);
@@ -864,7 +820,7 @@
         const [x, y] = q.shift();
         for (const [dx, dy] of step4) {
           const nx = x + dx, ny = y + dy, k = idx(B, nx, ny);
-          if (!inB(B, nx, ny) || prev.has(k) || !freeFor(B, nx, ny, e, ember) || wallBetween(B, { x, y }, { x: nx, y: ny })) continue;
+          if (!inB(B, nx, ny) || prev.has(k) || !freeFor(B, nx, ny, e, ember)) continue;
           prev.set(k, idx(B, x, y));
           if (cheb({ x: nx, y: ny }, B.hero) <= 1) { goal = k; break; }
           q.push([nx, ny]);
@@ -880,7 +836,7 @@
       let best = null, bd = cheb(e, B.hero);
       for (const [dx, dy] of step4) {
         const t = { x: e.x + dx, y: e.y + dy };
-        if (!inB(B, t.x, t.y) || !freeFor(B, t.x, t.y, e, ember) || wallBetween(B, e, t)) continue;
+        if (!inB(B, t.x, t.y) || !freeFor(B, t.x, t.y, e, ember)) continue;
         const dd = cheb(t, B.hero);
         if (dd > bd) { bd = dd; best = t; }
       }
@@ -1045,7 +1001,7 @@
 
   EL.Logic = {
     CARD, CW, DIRS8, rngFrom, createRun, stats, genMap, nextNodes, genBattle,
-    blockedSet, stepError, wallBetween, passable, isWeakEntry, sealedBy, enemyAt, enemiesAt, covers, isRock, idx, inB,
+    blockedSet, stepError, isWeakEntry, sealedBy, enemyAt, enemiesAt, covers, isRock, idx, inB,
     simulate, commitRoute, enemyPhase, genRewards, applyReward, heal, reachable, weakEntries,
     condReq, condProgress, pressureOf, enemyPressure, has, coolCount, canMove, unstick,
     teleTiles, teleDmgAt, planTelegraphs, pushDist,

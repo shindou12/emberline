@@ -118,7 +118,7 @@
       this.interactive = true; this.inputKind = "route";
       this.tiles = new Array(GW * GH).fill(0);
       this.dim = 0; this.reach = null; this.entries = []; this.entryEmph = 0; this.t = 0; this.cursor = null; this.heroTile = null; this.heroHint = 0;
-      this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.walls = []; this.seals = [];
+      this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.seals = [];
     }
     /* raw pointer → route input event (geometry only; legality decided elsewhere) */
     routeInput(phase, p) {
@@ -216,36 +216,9 @@
       }
     }
   }
-  /* edge walls: a low stone wall standing on the border between two tiles
-     (drawn by DepthSortView so it overlaps units correctly; board-local coords) */
-  function drawWall(ctx, w) {
-    const H = 16; // visible height of the wall face
-    if (w.d === "D") {
-      const x0 = w.x * T - 2, y0 = (w.y + 1) * T, len = T + 4;
-      ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(x0, y0 + 2, len, 6);
-      ctx.fillStyle = C.ink; ctx.fillRect(x0 - 1, y0 - H - 1, len + 2, H + 5);
-      ctx.fillStyle = "#6a5c86"; ctx.fillRect(x0, y0 - H + 4, len, H);
-      ctx.fillStyle = "#a898c8"; ctx.fillRect(x0, y0 - H, len, 4);
-      ctx.fillStyle = "#e2d8f4"; ctx.fillRect(x0, y0 - H, len, 1);
-      ctx.fillStyle = "#3e3456";
-      for (let i = 6 + ((w.x * 7) % 5); i < len - 2; i += 12) ctx.fillRect(x0 + i, y0 - H + 5, 2, H - 2);
-      ctx.fillRect(x0, y0 - H + 9, len, 1);
-    } else {
-      const x0 = (w.x + 1) * T - 4, y0 = w.y * T - 2, len = T + 4;
-      ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(x0 + 8, y0 + 4, 4, len);
-      ctx.fillStyle = C.ink; ctx.fillRect(x0 - 1, y0 - H - 1, 10, len + H + 2);
-      ctx.fillStyle = "#6a5c86"; ctx.fillRect(x0, y0 - H + 4, 8, len + H - 4);
-      ctx.fillStyle = "#a898c8"; ctx.fillRect(x0, y0 - H, 8, len);
-      ctx.fillStyle = "#e2d8f4"; ctx.fillRect(x0, y0 - H, 1, len);
-      ctx.fillStyle = "#3e3456";
-      for (let i = 8 + ((w.y * 5) % 7); i < len - 2; i += 12) ctx.fillRect(x0, y0 - H + i, 8, 2);
-    }
-  }
-  V.drawWall = drawWall;
-
-  /* units, enemies and edge walls drawn back-to-front by where they stand */
+  /* units and enemies drawn back-to-front by where they stand */
   class DepthSortView extends EL.Node {
-    constructor(board) { super("DepthSorted"); this.board = board; }
+    constructor() { super("DepthSorted"); }
     render(ctx) {
       if (!this.visible || this.alpha <= 0.003) return;
       ctx.save();
@@ -256,16 +229,8 @@
         if (!g.visible) continue;
         for (const c of g.children) items.push({ d: c.depth ? c.depth() : c.y, n: n++, node: c });
       }
-      for (const w of this.board.walls) {
-        // a wall on a tile's lower edge sits between that row and the next; a side wall belongs to its row
-        const d = BY + (w.y + 1) * T + (w.d === "D" ? 0 : -1);
-        items.push({ d, n: n++, wall: w });
-      }
       items.sort((a, b) => a.d - b.d || a.n - b.n);
-      for (const it of items) {
-        if (it.node) { it.node.render(ctx); continue; }
-        ctx.save(); ctx.translate(BX, BY); drawWall(ctx, it.wall); ctx.restore();
-      }
+      for (const it of items) it.node.render(ctx);
       for (const g of this.children) {
         if (!g.visible) continue;
         for (const c of g.children) {
@@ -282,25 +247,29 @@
     if (!this.teles.length) return;
     const sum = new Map();
     for (const t of this.teles) { const k = t.y * GW + t.x; sum.set(k, (sum.get(k) || 0) + t.dmg); }
-    const pulse = 0.5 + 0.5 * Math.sin(this.t / 160);
+    const pulse = 0.5 + 0.5 * Math.sin(this.t / 200);
+    const Y = "#ffd35a";
     for (const [k, dmg] of sum) {
       const x = k % GW, y = Math.floor(k / GW), px = x * T, py = y * T;
+      // stronger only on the tile where the hero will end the turn
       const hero = this.heroEnd && this.heroEnd.x === x && this.heroEnd.y === y;
-      ctx.globalAlpha = (hero ? 0.42 : 0.24) + 0.14 * pulse;
-      A.dither(ctx, px + 2, py + 2, T - 4, T - 4, "#ff3a2a", Math.floor(this.t / 240) % 2);
-      ctx.globalAlpha = 1;
-      // hazard corners
-      ctx.fillStyle = hero ? "#ffd35a" : "#ff5a3a";
-      const L = 10;
-      ctx.fillRect(px + 1, py + 1, L, 3); ctx.fillRect(px + 1, py + 1, 3, L);
-      ctx.fillRect(px + T - 1 - L, py + 1, L, 3); ctx.fillRect(px + T - 4, py + 1, 3, L);
-      ctx.fillRect(px + 1, py + T - 4, L, 3); ctx.fillRect(px + 1, py + T - 1 - L, 3, L);
-      ctx.fillRect(px + T - 1 - L, py + T - 4, L, 3); ctx.fillRect(px + T - 4, py + T - 1 - L, 3, L);
+      ctx.globalAlpha = (hero ? 0.26 : 0.1) + (hero ? 0.12 : 0.05) * pulse;
+      A.dither(ctx, px + 3, py + 3, T - 6, T - 6, Y, Math.floor(this.t / 260) % 2);
+      // thin hazard corners
+      ctx.globalAlpha = hero ? 0.95 : 0.5;
+      ctx.fillStyle = Y;
+      const L = 7;
+      ctx.fillRect(px + 2, py + 2, L, 2); ctx.fillRect(px + 2, py + 2, 2, L);
+      ctx.fillRect(px + T - 2 - L, py + 2, L, 2); ctx.fillRect(px + T - 4, py + 2, 2, L);
+      ctx.fillRect(px + 2, py + T - 4, L, 2); ctx.fillRect(px + 2, py + T - 2 - L, 2, L);
+      ctx.fillRect(px + T - 2 - L, py + T - 4, L, 2); ctx.fillRect(px + T - 4, py + T - 2 - L, 2, L);
       // damage tag
-      const tx = px + 5, ty = py + T - 17;
-      ctx.fillStyle = C.ink; ctx.fillRect(tx - 1, ty - 1, 26, 14);
-      ctx.fillStyle = hero ? "#ffd35a" : "#c0241a"; ctx.fillRect(tx, ty, 24, 12);
-      A.text(ctx, "!" + dmg, tx + 12, ty + 2, { s: 1, align: "center", color: hero ? C.ink : "#fff6df" });
+      const tx = px + 5, ty = py + T - 16;
+      ctx.globalAlpha = hero ? 1 : 0.7;
+      ctx.fillStyle = C.ink; ctx.fillRect(tx - 1, ty - 1, 22, 12);
+      ctx.fillStyle = hero ? Y : "#4a3a10"; ctx.fillRect(tx, ty, 20, 10);
+      A.text(ctx, "!" + dmg, tx + 10, ty + 1, { s: 1, align: "center", color: hero ? C.ink : Y });
+      ctx.globalAlpha = 1;
     }
   };
   /* ward pillar range: a violet square; enemies inside have no weak side */
@@ -689,7 +658,7 @@
         ctx.fillStyle = "#e9dcff"; ctx.fillRect(r.x + r.s - 12 + k * 2, r.y + 7, 2, 4);
       }
     }
-    /* HP bar and aim markers: drawn after the depth-sorted pass so walls never hide them */
+    /* HP bar and aim markers: drawn after the depth-sorted pass so nothing hides them */
     drawUI(ctx) {
       if (this.dead || !this.visible) return;
       const r = this.rect();
@@ -1713,8 +1682,8 @@
     { t: "反撃", b: "盾のある側から上下左右にまっすぐ斬って、倒しきれないと反撃を受ける。斜めから斬れば反撃されない（弱点ボーナスもなし）。", demo: "guard" },
     { t: "結界柱", b: "結界柱のまわり2マス（紫の枠）にいる敵は弱点が消える。柱を倒すか、敵を枠の外へ押し出せば、ルートの途中でもすぐ弱点が戻る。", demo: "seal" },
     { t: "押し出しともつれ", b: "押された敵が壁・岩・足跡・敵にぶつかると衝突ダメージ（残り移動が多いほど強い）を受け「もつれ」る。もつれた敵は反撃せず、斬れば弱点ダメージ（斬るとほどける）。敵同士は同じマスに重なる。同じ敵を2回目以降に斬ると押すだけ。", demo: "push" },
-    { t: "岩と壁", b: "岩はマスごと塞ぐが、岩と岩の斜めのすき間は通れる。石の壁はマスの辺だけを塞ぐ。壁ごしには進めず、押された敵も壁で止まる。", demo: "wall" },
-    { t: "攻撃予告", b: "骨砕きとボスは、次の敵ターンに攻撃するマスを赤く予告する。そこで終わると被弾。押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
+    { t: "岩", b: "岩はマスごと塞ぐが、岩と岩の斜めのすき間は通れる。押された敵は岩や盤面の端にぶつかって止まり、もつれる。", demo: "wall" },
+    { t: "攻撃予告", b: "骨砕きとボスは、次の敵ターンに攻撃するマスを黄色く予告する。そこで終わると被弾。押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
     { t: "撃破で移動回復", b: "敵を倒すと移動力が回復する（1ルートで最初の撃破は+2、2体目からは+1）。倒して、進んで、また倒す。長い連鎖が勝利への近道。", demo: "chain" },
     { t: "燠火の足跡", b: "歩いたマスは燃えて、しばらく入れない。斜めに交差するのはOK。敵がいたマスは燃えないので、もう一度踏み込める。仲間が増えるほど足跡は長く残る。", demo: "ember" },
     { t: "夜の圧", b: "ターン終了時、生き残った敵の数だけダメージを受ける。紫の炎の数がその敵の圧。のんびりしていると押し潰される。", demo: "pressure" },
@@ -1794,9 +1763,7 @@
       }
       if (kind === "wall") {
         for (const [x, y] of [[1, 4], [2, 5]]) { const c = cell(x, y); A.spr(ctx, "rock", c.x, c.y + 16, { s: 2 }); }
-        const w = cell(4, 2);
-        ctx.fillStyle = C.ink; ctx.fillRect(w.x + 17, w.y - 26, 8, 48);
-        ctx.fillStyle = "#7a6c92"; ctx.fillRect(w.x + 18, w.y - 25, 6, 46);
+        const rk = cell(5, 2); A.spr(ctx, "rock", rk.x, rk.y + 16, { s: 2 });
         const hit = n >= 5;
         const e = hit ? cell(4, 2) : cell(3, 2);
         if (!hit) A.spr(ctx, "husk", e.x, e.y + 16, { s: 2 });
@@ -1818,7 +1785,7 @@
       }
       if (kind === "tele") {
         const e = cell(3, 1);
-        for (let y = 2; y <= 4; y++) { const c = cell(3, y); ctx.globalAlpha = 0.55; A.dither(ctx, c.x - 18, c.y - 18, 36, 36, "#ff3a2a", fl); ctx.globalAlpha = 1; A.text(ctx, "!2", c.x - 8, c.y + 6, { s: 1, color: "#fff6df" }); }
+        for (let y = 2; y <= 4; y++) { const c = cell(3, y); ctx.globalAlpha = 0.55; A.dither(ctx, c.x - 18, c.y - 18, 36, 36, "#ffd35a", fl); ctx.globalAlpha = 1; A.text(ctx, "!2", c.x - 8, c.y + 6, { s: 1, color: "#ffd35a" }); }
         A.spr(ctx, "wisp", e.x, e.y + 16, { s: 2 });
         const h = cell(1, 5); A.spr(ctx, "kai", h.x, h.y + 16, { s: 2 });
       }

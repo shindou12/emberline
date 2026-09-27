@@ -155,7 +155,6 @@
     setupBattle() {
       const v = this.v, B = this.B, run = this.run;
       v.board.tiles = B.tiles;
-      v.board.walls = [...(B.walls || [])].map((k) => { const [x, y, d] = k.split(","); return { x: +x, y: +y, d }; });
       v.footprints.trail = B.trail.map((t) => ({ x: t.x, y: t.y }));
       v.footprints.births.clear(); v.footprints.ashes = [];
       v.route.pts = []; v.route.skillMarks = []; v.route.areas = [];
@@ -327,7 +326,6 @@
           S.play("invalid");
           if (err === "moves") this.hint("移動力が足りない — 撃破で回復する");
           else if (err === "ember") this.hint("燃えている足跡には入れない（斜めの交差はOK）");
-          else if (err === "wall") this.hint("壁は越えられない");
         }
       }
     }
