@@ -48,10 +48,13 @@
     // route confirmation (shown only while a drawn route waits)
     v.actionBar = hudLayer.add(new EL.Node("ActionBar"));
     v.actionBar.visible = false;
-    const redo = v.actionBar.add(new V.ButtonView("route.redo", "やり直す", 112, 34, { face: "#3a2f58", top: "#5a4a82", base: "#1a1428", color: "#fff6df", outline: "#120e1c" }));
+    const sub = { face: "#3a2f58", top: "#5a4a82", base: "#1a1428", color: "#fff6df", outline: "#120e1c" };
+    const redo = v.actionBar.add(new V.ButtonView("route.redo", "やり直す", 96, 34, sub));
     redo.x = 12; redo.y = 602;
-    const go = v.actionBar.add(new V.ButtonView("route.go", "出撃！", 222, 34, { face: "#ff8a2a", top: "#ffd35a", base: "#8a2f0a" }));
-    go.x = 126; go.y = 602; go.glow = 1;
+    const undo = v.actionBar.add(new V.ButtonView("route.undo", "1マス戻す", 96, 34, sub));
+    undo.x = 112; undo.y = 602;
+    const go = v.actionBar.add(new V.ButtonView("route.go", "出撃！", 136, 34, { face: "#ff8a2a", top: "#ffd35a", base: "#8a2f0a" }));
+    go.x = 212; go.y = 602; go.glow = 1;
 
     // Overlay
     v.combo = overlayLayer.add(new V.ComboView());

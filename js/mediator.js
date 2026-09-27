@@ -1323,6 +1323,12 @@
         if (evt.type === "ui.click") {
           if (d.id === "route.go") { S.play("confirm"); this.go("Battle.Executing", this.route); }
           if (d.id === "route.redo") { S.play("cancel"); this.setDragUI(false); this.go("Battle.Idle"); }
+          if (d.id === "route.undo") {
+            S.play("stepBack");
+            this.route = this.route.slice(0, -1);
+            if (this.route.length < 2) { this.setDragUI(false); this.go("Battle.Idle"); return; }
+            this.finishRoute(); // re-plans (and never leaves the route ending on an enemy)
+          }
           return;
         }
         if (evt.type !== "route.input") return;
