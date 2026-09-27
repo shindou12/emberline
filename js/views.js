@@ -603,7 +603,7 @@
       this.uid = e.uid; this.type = e.type; this.sprite = d.sprite; this.size = e.size || 1;
       this.tx = e.x; this.ty = e.y; this.hp = e.hp; this.maxHp = e.maxHp; this.shownHp = e.hp;
       this.weak = e.weak; this.sealed = false; this.pressure = e.pressure; this.boss = !!e.boss;
-      this.emph = 0; this.target = false; this.kill = false; this.dmg = null; this.dmgWeak = false; this.guardDmg = null; this.blocked = false;
+      this.emph = 0; this.target = false; this.kill = false; this.dmg = null; this.dmgWeak = false; this.guardDmg = null; this.blocked = false; this.pushOnly = false;
       this.tangled = false; this.sox = 0; this.soy = 0; this.push = null;
       this.flash = 0; this.ox = 0; this.oy = 0; this.t = Math.random() * 1000; this.spin = 0; this.phase2 = false; this.intent = d.summons ? "summon" : null;
       this.flip = false; this.dead = false; this.lunge = 0;
@@ -755,7 +755,8 @@
       ctx.fillRect(x1 - L, y0, L, 3); ctx.fillRect(x1 - 3, y0, 3, L);
       ctx.fillRect(x0, y1 - 3, L, 3); ctx.fillRect(x0, y1 - L, 3, L);
       ctx.fillRect(x1 - L, y1 - 3, L, 3); ctx.fillRect(x1 - 3, y1 - L, 3, L);
-      if (this.dmg != null) {
+      if (this.pushOnly) A.jp(ctx, "押すだけ", r.x + r.s / 2, r.y - (this.dmg ? 42 : 18), { size: 12, align: "center", color: C.cream, ow: 1 });
+      if (this.dmg) {
         const cx = r.x + r.s / 2;
         const col = this.dmgWeak ? C.weak : C.cream;
         A.text(ctx, String(this.dmg), cx, r.y - 16, { s: 3, align: "center", color: col, grad: this.dmgWeak ? "#fff6df" : null });
@@ -1672,7 +1673,7 @@
     { t: "ウィークサイド", b: "盾に囲まれていない光る側面が弱点。矢印の方向からまっすぐ突っ込むと大ダメージ。", demo: "weak" },
     { t: "反撃", b: "盾のある側から上下左右にまっすぐ斬って、倒しきれないと反撃を受ける。斜めから斬れば反撃されない（弱点ボーナスもなし）。", demo: "guard" },
     { t: "結界柱", b: "結界柱のまわり2マス（紫の枠）にいる敵は弱点が消える。柱を倒すか、敵を枠の外へ押し出せば、ルートの途中でもすぐ弱点が戻る。", demo: "seal" },
-    { t: "押し出しともつれ", b: "押された敵は壁・岩・敵にぶつかると衝突ダメージ。残りの移動が多いほど強くぶつかる。敵にぶつかると同じマスに絡まり「もつれ」になる（移動+1）。もつれた敵は反撃せず、斬れば全員が弱点ダメージ。", demo: "push" },
+    { t: "押し出しともつれ", b: "押された敵は壁・岩・敵にぶつかると衝突ダメージ。残りの移動が多いほど強くぶつかる。1ルートで同じ敵を2回目以降に斬ると、ダメージなしで押すだけ（ボスともつれは例外）。敵にぶつかると同じマスに絡まり「もつれ」になる（移動+1）。もつれた敵は反撃せず、斬れば全員が弱点ダメージ。", demo: "push" },
     { t: "岩と壁", b: "岩はマスごと塞ぐが、岩と岩の斜めのすき間は通れる。石の壁はマスの辺だけを塞ぐ。壁ごしには進めず、押された敵も壁で止まる。", demo: "wall" },
     { t: "攻撃予告", b: "骨砕きとボスは、次の敵ターンに攻撃するマスを赤く予告する。そこで終わると被弾。押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
     { t: "撃破で移動回復", b: "敵を倒すと移動力が回復する（1ルートで最初の撃破は+2、2体目からは+1）。倒して、進んで、また倒す。長い連鎖が勝利への近道。", demo: "chain" },

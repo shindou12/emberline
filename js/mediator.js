@@ -264,7 +264,7 @@
     clearTargets() {
       for (const k in this.enemyViews) {
         const ev = this.enemyViews[k];
-        ev.target = false; ev.kill = false; ev.dmg = null; ev.guardDmg = null; ev.blocked = false; ev.dmgWeak = false;
+        ev.target = false; ev.kill = false; ev.dmg = null; ev.guardDmg = null; ev.blocked = false; ev.dmgWeak = false; ev.pushOnly = false;
       }
     }
     resetTurnHud() {
@@ -357,7 +357,7 @@
         for (const at of st.attacks) {
           attacks++;
           const ev = this.enemyViews[at.uid];
-          if (ev) ev.dmgWeak = ev.dmgWeak || at.weak;
+          if (ev) { ev.dmgWeak = ev.dmgWeak || at.weak; if (at.pushOnly) { ev.pushOnly = true; ev.target = true; if (ev.dmg == null) ev.dmg = 0; } }
         }
         for (const g of st.guards) {
           const ev = this.enemyViews[g.uid];
@@ -492,6 +492,17 @@
     async ev_attack(ev) {
       const v = this.v, evw = this.enemyViews[ev.uid];
       if (!evw) return;
+      if (ev.pushOnly) {
+        // follow-up on an enemy already struck this route: a shove, no blade damage
+        const p = ev.tile ? tc(ev.tile.x, ev.tile.y) : { x: evw.rect().x + 24, y: evw.rect().y + 24 };
+        evw.ox = U.sign(ev.dir[0]) * 6; evw.oy = U.sign(ev.dir[1]) * 6;
+        EL.tween(evw, { ox: 0, oy: 0 }, 180, { ease: U.ease.outBack });
+        v.fx.burst(p.x, p.y, 8, { angle: Math.atan2(ev.dir[1], ev.dir[0]), spread: 1.2, speed: [60, 160], life: [150, 320], palette: ["#d3dbea", C.cream], size: 2 });
+        v.floats.spawn("押す", p.x, p.y - 34, { kind: "jp", color: C.cream, life: 600, vy: -30 });
+        S.play("dash"); this.cam.shake(2, 100);
+        await EL.wait(50);
+        return;
+      }
       const r = evw.rect();
       const cx = r.x + r.s / 2, cy = r.y + r.s / 2;
       const hitPoint = ev.tile ? tc(ev.tile.x, ev.tile.y) : { x: cx, y: cy };

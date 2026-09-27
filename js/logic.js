@@ -427,7 +427,7 @@
       guardBlock: (run.heroId === "gorm" ? 1 : 0) + (has(run, "shade") ? 1 : 0), guardHits: 0,
       forcedWeak: 0, uses: {}, marks: {}, dirs: [], straight: 0, route: [route[0]],
       compassUsed: false, plumeUsed: run.plumeUsed, bumps: 0, tangles: 0, multi: 0,
-      cold: new Set(), coldAt: [false],
+      cold: new Set(), coldAt: [false], hitCount: {},
     };
     const events = [], steps = [];
     let outcome = "ok", last = 0, done = false;
@@ -640,6 +640,7 @@
           let killed = 0;
           for (const e of hereE) {
             if (!e.alive || done) continue;
+            T.hitCount[e.uid] = (T.hitCount[e.uid] || 0) + 1; // a tangle can always be cashed in
             const dmg = Math.floor(base * S.weakMult);
             T.weakHits++; T.attacks++;
             rec.attacks.push({ uid: e.uid, dmg, weak: true, tangle: true, kill: e.hp - dmg <= 0 });
@@ -649,20 +650,30 @@
           T.multi = Math.max(T.multi, killed);
         } else {
           const e = hereE[0];
-          const sealed = sealedBy(st.enemies, e);
-          let weak = !sealed && isWeakEntry(e, a, b), forced = false;
-          if (!weak && T.forcedWeak > 0) { weak = true; forced = true; T.forcedWeak--; }
-          if (!weak && has(run, "oath") && T.attacks === 0) { weak = true; forced = true; }
-          T.attacks++;
-          let dmg = base;
-          if (weak) { dmg = Math.floor(dmg * S.weakMult); T.weakHits++; }
-          if (e.boss && st.phase2 && !weak) dmg = Math.ceil(dmg / 2);
-          rec.attacks.push({ uid: e.uid, dmg, weak, forced, sealed, kill: e.hp - dmg <= 0, bonus });
-          damage(e, dmg, "hero", rec, { weak, forced, sealed, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
-          const moved = !done && e.alive ? shove(e, d, rec) : false;
-          // counterattack: a straight (non-diagonal) hit on a shielded side that leaves it standing
-          if (!done && e.alive && !weak && !diag && e.atk > 0 && !e.tangled && !(moved && has(run, "aegis"))) counter(e, rec);
-          if (done) break;
+          // an enemy already struck this route is only shoved: the follow-up deals no blade damage
+          // (enemies that cannot be shoved, i.e. the boss, may be struck again)
+          const again = (T.hitCount[e.uid] = (T.hitCount[e.uid] || 0) + 1) > 1 && !e.boss && e.size === 1;
+          if (again) {
+            T.attacks++;
+            rec.attacks.push({ uid: e.uid, dmg: 0, weak: false, pushOnly: true, kill: false });
+            push({ type: "attack", uid: e.uid, dmg: 0, hp: e.hp, maxHp: e.maxHp, pushOnly: true, dir: d, diag, tile: { x: b.x, y: b.y } });
+            shove(e, d, rec);
+          } else {
+            const sealed = sealedBy(st.enemies, e);
+            let weak = !sealed && isWeakEntry(e, a, b), forced = false;
+            if (!weak && T.forcedWeak > 0) { weak = true; forced = true; T.forcedWeak--; }
+            if (!weak && has(run, "oath") && T.attacks === 0) { weak = true; forced = true; }
+            T.attacks++;
+            let dmg = base;
+            if (weak) { dmg = Math.floor(dmg * S.weakMult); T.weakHits++; }
+            if (e.boss && st.phase2 && !weak) dmg = Math.ceil(dmg / 2);
+            rec.attacks.push({ uid: e.uid, dmg, weak, forced, sealed, kill: e.hp - dmg <= 0, bonus });
+            damage(e, dmg, "hero", rec, { weak, forced, sealed, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
+            const moved = !done && e.alive ? shove(e, d, rec) : false;
+            // counterattack: a straight (non-diagonal) hit on a shielded side that leaves it standing
+            if (!done && e.alive && !weak && !diag && e.atk > 0 && !e.tangled && !(moved && has(run, "aegis"))) counter(e, rec);
+            if (done) break;
+          }
         }
         rec.attack = rec.attacks[0] || null;
       }
