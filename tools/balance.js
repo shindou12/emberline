@@ -21,7 +21,7 @@ function score(res, B, run) {
     for (const t of L.weakEntries(B, alive, e)) near = Math.min(near, Math.max(Math.abs(t.x - end.x), Math.abs(t.y - end.y)));
     near = Math.min(near, Math.max(Math.abs(e.x - end.x), Math.abs(e.y - end.y)) + 1);
   }
-  const room = L.reachable(B, L.blockedSet(B, res.T.route), end, 3).size;
+  const room = L.reachable(B, L.blockedSet(B, res.T.route, res.T.cold), end, 3).size;
   const hpLeft = T.hp - res.teleEnd;
   if (hpLeft - pressure <= 0) return -5e5;
   return T.kills * 30 + dmg * 3 - (run.hp - hpLeft) * 4 - pressure * 6 + T.moves * 0.5 - near * 3 + room * 0.4 + T.tangles * 4;
@@ -35,7 +35,7 @@ function bestRoute(B, run, beam = 70) {
       const res = f.res || L.simulate(B, run, f.route);
       if (res.outcome !== "ok") continue;
       const cur = f.route[f.route.length - 1];
-      const blocked = L.blockedSet(B, f.route);
+      const blocked = L.blockedSet(B, f.route, res.T.cold);
       for (const [dx, dy] of L.DIRS8) {
         const nt = { x: cur.x + dx, y: cur.y + dy };
         if (L.stepError(B, blocked, res.T.moves, cur, nt)) continue;

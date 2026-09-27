@@ -19,14 +19,36 @@
       s.buffer = b; s.connect(ctx.destination); s.start(0);
     } catch (_) {}
   }
-  document.addEventListener("visibilitychange", () => {
+  /* iOS can leave a context that was backgrounded 'running' but silent, or
+     stuck 'interrupted'. After any trip to the background we therefore
+     rebuild the whole audio graph on the next touch (touches may create and
+     unlock audio) and restart the current song. */
+  let stale = false, hiddenAt = 0;
+  const touchDevice = () => (navigator.maxTouchPoints || 0) > 0 || "ontouchstart" in window;
+  function sleep() { if (!ctx) return; hiddenAt = Date.now(); stale = true; ctx.suspend().catch(() => {}); }
+  function back() {
     if (!ctx) return;
-    if (document.hidden) ctx.suspend().catch(() => {});
-    else wake();
-  });
-  window.addEventListener("pageshow", () => wake());
-  window.addEventListener("focus", () => wake());
+    wake();
+    // desktop: resuming is enough; only keep the rebuild armed if it did not take
+    setTimeout(() => { if (ctx && ctx.state === "running" && !touchDevice()) stale = false; }, 400);
+  }
+  document.addEventListener("visibilitychange", () => { if (document.hidden) sleep(); else back(); });
+  window.addEventListener("pagehide", sleep);
+  window.addEventListener("blur", () => { if (document.hidden) sleep(); });
+  window.addEventListener("pageshow", back);
+  window.addEventListener("focus", back);
+  function rebuild() {
+    const song = Seq.name || Seq.pending;
+    Seq.stop();
+    const old = ctx;
+    ctx = null;
+    try { old.close(); } catch (_) {}
+    init();
+    if (song && ctx) Seq.play(song);
+  }
   function init() {
+    if (ctx && stale) { stale = false; rebuild(); return; }
+    if (ctx && (ctx.state === "closed")) { rebuild(); return; }
     if (ctx) { wake(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
@@ -270,7 +292,14 @@
       const s = this.song;
       if (!s || !ctx) return;
       const sd = 60 / s.bpm / 4;
-      if (ctx.state !== "running") return;
+      if (ctx.state !== "running") {
+        // stuck (e.g. iOS 'interrupted') while visible for a while: rebuild on the next touch
+        if (document.hidden) this.idleSince = 0;
+        else if (!this.idleSince) this.idleSince = Date.now();
+        else if (Date.now() - this.idleSince > 1200) stale = true;
+        return;
+      }
+      this.idleSince = 0;
       if (this.next < ctx.currentTime - 0.25) this.next = ctx.currentTime + 0.05;
       while (this.next < ctx.currentTime + 0.12) {
         this.fire(s, this.step, this.next, sd);

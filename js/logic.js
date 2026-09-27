@@ -222,10 +222,12 @@
 
   /* ---------- geometry & rules ---------- */
   const enemiesAt = (enemies, x, y) => enemies.filter((e) => e.alive && covers(e, x, y));
-  function blockedSet(B, route) {
+  /* tiles you cannot step on: the old trail plus this route's burning tiles.
+     `cold` = route tiles that did not catch fire (an enemy stood there). */
+  function blockedSet(B, route, cold) {
     const s = new Set();
     for (const t of B.trail) s.add(idx(B, t.x, t.y));
-    if (route) for (const t of route) s.add(idx(B, t.x, t.y));
+    if (route) for (const t of route) { const k = idx(B, t.x, t.y); if (!cold || !cold.has(k)) s.add(k); }
     return s;
   }
   /* why a step is illegal ('' = legal). The View never decides this. */
@@ -401,6 +403,7 @@
       guardBlock: (run.heroId === "gorm" ? 1 : 0) + (has(run, "shade") ? 1 : 0), guarded: new Set(), guardEntered: 0, guardHits: 0,
       forcedWeak: 0, uses: {}, marks: {}, dirs: [], straight: 0, route: [route[0]],
       compassUsed: false, plumeUsed: run.plumeUsed, bumps: 0, tangles: 0, multi: 0,
+      cold: new Set(), coldAt: [false],
     };
     const events = [], steps = [];
     let outcome = "ok", last = 0, done = false;
@@ -444,7 +447,7 @@
     function shove(e, d, rec) {
       if (e.boss || e.size > 1) return;
       const n = pushDist(run);
-      const ember = blockedSet(B, T.route);
+      const ember = blockedSet(B, T.route, T.cold);
       const from = { x: e.x, y: e.y }, path = [];
       let stop = null, other = [];
       for (let k = 0; k < n; k++) {
@@ -579,7 +582,11 @@
       T.route.push(b);
       last = i;
       const diag = d[0] !== 0 && d[1] !== 0;
-      push({ type: "step", i, from: a, to: b, dir: d, diag, moves: T.moves });
+      // the ground under an enemy does not catch fire: you may cross it again
+      const cold = enemiesAt(st.enemies, b.x, b.y).length > 0;
+      if (cold) T.cold.add(idx(B, b.x, b.y)); else T.cold.delete(idx(B, b.x, b.y));
+      T.coldAt[i] = cold;
+      push({ type: "step", i, from: a, to: b, dir: d, diag, moves: T.moves, cold });
       const rec = { i, tile: b, attack: null, attacks: [], skills: [], kills: [], pushes: [], guards: [], moves: 0, hp: 0, relic: null };
       steps.push(rec);
 
@@ -599,7 +606,7 @@
       if (done) break;
 
       // 2. passing through enemies
-      const hereE = enemiesAt(st.enemies, b.x, b.y);
+      const hereE = enemiesAt(st.enemies, b.x, b.y).filter((e) => !covers(e, a.x, a.y));
       if (hereE.length) {
         const S = stats(run, T.hp);
         let bonus = 0;
@@ -657,7 +664,7 @@
     B.enemies = res.st.enemies.filter((e) => e.alive);
     B.phase2 = res.st.phase2;
     B.hero = { x: res.end.x, y: res.end.y };
-    for (let i = 1; i <= res.last; i++) B.trail.push({ x: route[i].x, y: route[i].y });
+    for (let i = 1; i <= res.last; i++) if (!res.T.coldAt[i]) B.trail.push({ x: route[i].x, y: route[i].y });
     run.hp = Math.max(0, res.T.hp);
     run.plumeUsed = res.T.plumeUsed;
     run.stats.kills += res.T.kills;

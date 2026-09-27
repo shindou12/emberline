@@ -276,7 +276,12 @@
       const r = this.route;
       const lastT = r[r.length - 1];
       if (sameTile(tile, lastT)) return;
-      const back = r.findIndex((t) => sameTile(t, tile));
+      // finger back onto the route = undo to there, except onto a tile that did not burn
+      // (an enemy's tile) further back: that is a legal step forward
+      let back = -1;
+      for (let k = r.length - 1; k >= 0; k--) if (sameTile(r[k], tile)) { back = k; break; }
+      const cold = this.preview && this.preview.T.cold.has(L.idx(B, tile.x, tile.y));
+      if (back >= 0 && cold && back < r.length - 2) back = -1;
       if (back >= 0) {
         this.route = r.slice(0, back + 1);
         S.play("stepBack");
@@ -291,7 +296,7 @@
         if (this.preview && this.preview.outcome !== "ok") { err = "done"; break; }
         const next = { x: cur.x + U.sign(tile.x - cur.x), y: cur.y + U.sign(tile.y - cur.y) };
         const moves = this.preview ? this.preview.T.moves : L.stats(run).mov;
-        err = L.stepError(B, L.blockedSet(B, this.route), moves, cur, next);
+        err = L.stepError(B, L.blockedSet(B, this.route, this.preview && this.preview.T.cold), moves, cur, next);
         if (err) break;
         this.route.push(next);
         added++;
@@ -369,7 +374,7 @@
         if (c.ready && !wasReady) { c.bounce = 1; EL.tween(c, { bounce: 0 }, 300, { clock: "ui", ease: U.ease.outBack }); }
       });
       // reachable tiles & weak-side approach pads
-      const blocked = L.blockedSet(B, this.route);
+      const blocked = L.blockedSet(B, this.route, res.T.cold);
       const end = this.route[this.route.length - 1];
       v.board.reach = res.outcome === "ok" ? L.reachable(B, blocked, end, res.T.moves) : new Set();
       const pads = [];
@@ -445,8 +450,10 @@
       const v = this.v;
       const into = next && next.type === "attack";
       const dur = into ? 80 : U.clamp(118 - this.chain * 8, 64, 118);
-      v.footprints.trail.push({ x: ev.to.x, y: ev.to.y });
-      v.footprints.births.set(ev.to.x + "," + ev.to.y, v.footprints.t);
+      if (!ev.cold) {
+        v.footprints.trail.push({ x: ev.to.x, y: ev.to.y });
+        v.footprints.births.set(ev.to.x + "," + ev.to.y, v.footprints.t);
+      }
       this.coolPreview();
       this.path.push({ x: ev.to.x, y: ev.to.y });
       v.route.consumed = ev.i;
