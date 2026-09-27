@@ -1403,7 +1403,7 @@
     constructor(id, icon) { super(id, "", 30, 30, {}); this.icon2 = icon; }
     draw(ctx) {
       const dy = A.button(ctx, 0, 0, this.w, this.h, { pressed: this.pressed, face: "#3a2f58", top: "#5a4a82", base: "#1a1428" });
-      A.spr(ctx, this.icon2, 15, 22 + dy, { s: 2 });
+      A.spr(ctx, this.icon2, this.w / 2, this.h / 2 + 7 + dy, { s: 2 });
     }
   }
   V.IconButton = IconButton;

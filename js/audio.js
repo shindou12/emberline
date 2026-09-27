@@ -217,14 +217,15 @@
     },
     roar() {
       const t = 0;
-      osc({ type: "sawtooth", f: 130, f2: 48, dur: 1.4, vol: 0.35, bus: shaper, t });
-      osc({ type: "sawtooth", f: 97, f2: 40, dur: 1.4, vol: 0.25, bus: shaper, t });
-      noise({ f: 700, f2: 150, dur: 1.4, vol: 0.35, ft: "lowpass", att: 0.1, t });
-      voice({ v: "o", f: 90, bend: 0.6, dur: 1.2, vol: 0.3, t });
+      // kept well below the old level: it plays at the boss intro and on bad event outcomes
+      osc({ type: "sawtooth", f: 130, f2: 48, dur: 1.4, vol: 0.13, bus: shaper, t });
+      osc({ type: "sawtooth", f: 97, f2: 40, dur: 1.4, vol: 0.09, bus: shaper, t });
+      noise({ f: 700, f2: 150, dur: 1.4, vol: 0.14, ft: "lowpass", att: 0.1, t });
+      voice({ v: "o", f: 90, bend: 0.6, dur: 1.2, vol: 0.13, t });
     },
     travel() { for (let i = 0; i < 4; i++) noise({ f: 700, dur: 0.05, vol: 0.08, ft: "lowpass", t: i * 0.12 }); },
     open() { noise({ f: 300, f2: 900, dur: 0.25, vol: 0.12, q: 4 }); [79, 84, 88].forEach((m, i) => osc({ type: "triangle", f: mtof(m), dur: 0.2, vol: 0.08, t: 0.2 + i * 0.06 })); },
-    phase() { SFX.roar(); osc({ type: "sine", f: 60, f2: 30, dur: 1.5, vol: 0.4 }); },
+    phase() { SFX.roar(); osc({ type: "sine", f: 60, f2: 30, dur: 1.5, vol: 0.18 }); },
     whoosh() { noise({ f: 300, f2: 2400, dur: 0.25, vol: 0.14, q: 0.6 }); },
     chime() { osc({ type: "triangle", f: 1568, dur: 0.3, vol: 0.08 }); osc({ type: "triangle", f: 2093, dur: 0.4, vol: 0.05, t: 0.04 }); },
   };
