@@ -155,6 +155,7 @@
     setupBattle() {
       const v = this.v, B = this.B, run = this.run;
       v.board.tiles = B.tiles;
+      v.board.loc = B.loc || "temple";
       v.footprints.trail = B.trail.map((t) => ({ x: t.x, y: t.y }));
       v.footprints.births.clear(); v.footprints.ashes = [];
       v.route.pts = []; v.route.skillMarks = []; v.route.areas = [];
@@ -1118,7 +1119,7 @@
         await this.wipe(async () => {
           this.showOnly([]);
           this.setHud("battle");
-          v.bg.theme = node.type === "boss" ? "boss" : "battle";
+          v.bg.theme = this.B.loc || (node.type === "boss" ? "boss" : "temple");
           this.refreshRunHud();
           this.setupBattle();
           this.resetTurnHud();
@@ -1128,7 +1129,7 @@
         if (node.type !== "boss") {
           const si = v.stageIntro;
           si.title = node.type === "elite" ? "強敵" : "戦闘";
-          si.sub = `${this.floorText()} ・ 敵 ${this.B.enemies.length}体`;
+          si.sub = `${this.floorText()} ・ ${EL.Locations.get(this.B.loc).name} ・ 敵 ${this.B.enemies.length}体`;
           si.color = node.type === "elite" ? "#ff4d5e" : C.gold;
           si.icon = null;
           this.busy = true;

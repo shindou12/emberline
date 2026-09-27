@@ -54,7 +54,7 @@
     constructor() { super("Background"); this.theme = "title"; this.t = 0; this.motes = []; this.cache = {}; this.pulse = 0; }
     bake(name) {
       if (this.cache[name]) return this.cache[name];
-      const th = THEMES[name];
+      const th = THEMES[name] || EL.Locations.get(name).bg;
       const cv = document.createElement("canvas");
       cv.width = 180; cv.height = 320;
       const g = cv.getContext("2d");
@@ -78,9 +78,10 @@
           for (let x = 0; x < 180; x += 2) g.fillRect(x + ((y1 / 1) % 2), y1 - 1, 1, 1);
         }
       }
-      // cave silhouettes
+      // cave silhouettes (or the location's own skyline)
       let s = 11;
       const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+      if (th.deco) { th.deco(g, rnd); this.cache[name] = cv; return cv; }
       g.fillStyle = "rgba(0,0,0,0.45)";
       for (let x = 0; x < 180; x += 6) { const h = 6 + Math.floor(rnd() * 22); g.fillRect(x, 0, 6, h); g.fillRect(x + 2, h, 2, Math.floor(rnd() * 8)); }
       g.fillStyle = "rgba(0,0,0,0.35)";
@@ -90,7 +91,7 @@
     }
     tick(dt) {
       this.t += dt;
-      const th = THEMES[this.theme];
+      const th = THEMES[this.theme] || EL.Locations.get(this.theme).bg;
       if (Math.random() < dt / 90 && this.motes.length < 50) {
         this.motes.push({ x: Math.random() * 360, y: th.up ? 650 : -10, vy: th.up ? -U.rand(12, 40) : U.rand(8, 20), vx: U.rand(-6, 6), c: U.pick(th.mote), life: U.rand(6000, 14000), ph: Math.random() * 6 });
       }
@@ -118,6 +119,7 @@
       this.interactive = true; this.inputKind = "route";
       this.tiles = new Array(GW * GH).fill(0);
       this.dim = 0; this.reach = null; this.entries = []; this.entryEmph = 0; this.t = 0; this.cursor = null; this.heroTile = null; this.heroHint = 0;
+      this.loc = "temple";
       this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.seals = []; this.starts = [];
     }
     /* raw pointer → route input event (geometry only; legality decided elsewhere) */
@@ -133,41 +135,26 @@
     }
     tick(dt) { this.t += dt; }
     draw(ctx) {
-      // back wall (reads as distance once the floor is tilted)
-      ctx.fillStyle = "#130e1f"; ctx.fillRect(-12, -82, this.w + 24, 76);
-      for (let i = 0; i < 8; i++) {
-        const ax = -12 + i * 48;
-        ctx.fillStyle = "#1d1630"; ctx.fillRect(ax + 6, -70, 36, 64);
-        ctx.fillStyle = "#0b0814"; ctx.fillRect(ax + 12, -58, 24, 52); ctx.fillRect(ax + 16, -62, 16, 4);
-        ctx.fillStyle = "#2a2140"; ctx.fillRect(ax, -82, 6, 76); ctx.fillStyle = "#3a2f58"; ctx.fillRect(ax, -82, 2, 76);
-      }
-      for (let yy = -80; yy < -8; yy += 8) { ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fillRect(-12, yy, this.w + 24, 2); }
+      const loc = EL.Locations.get(this.loc);
+      // back wall / scenery behind the board (reads as distance once the floor is tilted)
+      loc.back(ctx, this.w, this.t);
       // frame
       ctx.fillStyle = C.ink; ctx.fillRect(-8, -8, this.w + 16, this.h + 16);
       // slab thickness under the near edge
       ctx.fillStyle = "#0e0a18"; ctx.fillRect(-8, this.h + 8, this.w + 16, 10);
-      ctx.fillStyle = "#231a36"; ctx.fillRect(-8, this.h + 8, this.w + 16, 2);
-      ctx.fillStyle = "#2b2140"; ctx.fillRect(-6, -6, this.w + 12, this.h + 12);
-      ctx.fillStyle = "#4a3a66"; ctx.fillRect(-6, -6, this.w + 12, 2);
-      ctx.fillStyle = "#171125"; ctx.fillRect(-4, -4, this.w + 8, this.h + 8);
+      ctx.fillStyle = loc.frame[0]; ctx.fillRect(-8, this.h + 8, this.w + 16, 2);
+      ctx.fillStyle = loc.frame[0]; ctx.fillRect(-6, -6, this.w + 12, this.h + 12);
+      ctx.fillStyle = loc.frame[1]; ctx.fillRect(-6, -6, this.w + 12, 2);
+      ctx.fillStyle = loc.frame[2]; ctx.fillRect(-4, -4, this.w + 8, this.h + 8);
       for (let y = 0; y < GH; y++)
-        for (let x = 0; x < GW; x++) {
-          const px = x * T, py = y * T;
-          ctx.drawImage(A.TILES[hash(x, y) % 3], px, py, T, T);
-        }
-      // rocks
+        for (let x = 0; x < GW; x++) ctx.drawImage(loc.tiles[hash(x, y) % loc.tiles.length], x * T, y * T, T, T);
+      // obstacles
       for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) if (this.tiles[y * GW + x] === 1) {
-        ctx.fillStyle = "#140f20"; ctx.fillRect(x * T + 2, y * T + 2, T - 4, T - 4);
-        A.spr(ctx, "rock", x * T + T / 2, y * T + T - 4, { s: 3 });
+        ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(x * T + 2, y * T + 2, T - 4, T - 4);
+        A.spr(ctx, loc.obstacles[hash(x * 3, y * 5) % loc.obstacles.length], x * T + T / 2, y * T + T - 4, { s: 3 });
       }
-      // corner braziers
-      for (const [cx, cy] of [[-4, -4], [this.w + 4, -4], [-4, this.h + 4], [this.w + 4, this.h + 4]]) {
-        ctx.fillStyle = C.ink; ctx.fillRect(cx - 5, cy - 5, 10, 10);
-        ctx.fillStyle = "#6b4f2a"; ctx.fillRect(cx - 3, cy - 3, 6, 6);
-        const f = Math.floor(this.t / 110) % 3;
-        ctx.fillStyle = C.ember; ctx.fillRect(cx - 2, cy - 6 - f * 2, 4, 4 + f * 2);
-        ctx.fillStyle = C.emberL; ctx.fillRect(cx - 1, cy - 4 - f, 2, 2 + f);
-      }
+      // corner light fixtures
+      for (const [cx, cy] of [[-4, -4], [this.w + 4, -4], [-4, this.h + 4], [this.w + 4, this.h + 4]]) EL.Locations.corner(loc.corner, ctx, cx, cy, this.t);
     }
     drawOver(ctx) {
       // dim the tiles you cannot reach (only while drawing a route)
@@ -899,7 +886,7 @@
       for (const f of this.flashes) f.t += dt;
       this.flashes = this.flashes.filter((f) => f.t < f.life);
       if (this.bokeh.length < 9 && Math.random() < dt / 700)
-        this.bokeh.push({ x: Math.random() * 360, y: 660, r: U.rand(10, 28), vy: -U.rand(6, 16), vx: U.rand(-4, 4), a: U.rand(0.05, 0.12), life: U.rand(9000, 16000), c: Math.random() < 0.7 ? "255,160,80" : "180,150,255" });
+        this.bokeh.push({ x: Math.random() * 360, y: 660, r: U.rand(10, 28), vy: -U.rand(6, 16), vx: U.rand(-4, 4), a: U.rand(0.05, 0.12), life: U.rand(9000, 16000), c: (this.bokehCols || ["255,160,80", "180,150,255"])[Math.random() < 0.7 ? 0 : 1] });
       for (const b of this.bokeh) { b.x += (b.vx * dt) / 1000; b.y += (b.vy * dt) / 1000; b.life -= dt; }
       this.bokeh = this.bokeh.filter((b) => b.life > 0 && b.y > -40);
     }
@@ -914,7 +901,8 @@
         out.push([p.x, p.y, 44, "255,110,40", (0.25 + 0.35 * ((k + 1) / n)) * fl(k)]);
       }
       const b = v.board;
-      for (const [x, y] of [[BX - 4, BY - 4], [BX + b.w + 4, BY - 4], [BX - 4, BY + b.h + 4], [BX + b.w + 4, BY + b.h + 4]]) { const p = P(x, y); out.push([p.x, p.y, 80, "255,150,70", 0.75 * fl(x)]); }
+      const lc = EL.Locations.get(v.bg.theme).light.corner;
+      for (const [x, y] of [[BX - 4, BY - 4], [BX + b.w + 4, BY - 4], [BX - 4, BY + b.h + 4], [BX + b.w + 4, BY + b.h + 4]]) { const p = P(x, y - 12); out.push([p.x, p.y, 84, lc, 0.75 * fl(x)]); }
       for (const e of v.enemies.children) {
         if (e.dead || e.alpha < 0.1) continue;
         const r = e.rect(), p = P(r.x + r.s / 2, r.y + r.s / 2);
@@ -930,11 +918,12 @@
     }
     draw(ctx) {
       if (!EL.warp || !EL.warp.enabled || !this.v) return;
-      const boss = this.v.bg.theme === "boss";
+      const LT = EL.Locations.get(this.v.bg.theme).light;
+      this.bokehCols = LT.bokeh;
       // 1. lightmap (quarter res) multiplied over the scene, then a soft additive glow
       const lg = this.lc.getContext("2d");
       lg.globalCompositeOperation = "source-over";
-      lg.fillStyle = boss ? "#8e6680" : "#8580b2";
+      lg.fillStyle = LT.ambient;
       lg.fillRect(0, 0, 90, 160);
       lg.globalCompositeOperation = "lighter";
       for (const [x, y, r, col, a] of this.lights()) {
@@ -987,10 +976,10 @@
       for (let i = 0; i < 3; i++) {
         const sway = Math.sin(this.t / 3000 + i * 2) * 12;
         const x0 = 20 + i * 110 + sway;
-        ctx.globalAlpha = 0.045 + 0.02 * Math.sin(this.t / 1700 + i);
+        ctx.globalAlpha = LT.shaftA * (1 + 0.45 * Math.sin(this.t / 1700 + i));
         const g = ctx.createLinearGradient(x0, 0, x0 + 120, 520);
-        g.addColorStop(0, boss ? "rgba(255,120,120,1)" : "rgba(255,210,150,1)");
-        g.addColorStop(1, "rgba(255,210,150,0)");
+        g.addColorStop(0, `rgba(${LT.shaft},1)`);
+        g.addColorStop(1, `rgba(${LT.shaft},0)`);
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0 + 46, 0); ctx.lineTo(x0 + 190, 520); ctx.lineTo(x0 + 110, 520); ctx.closePath(); ctx.fill();
       }

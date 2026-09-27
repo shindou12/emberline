@@ -190,10 +190,23 @@
     B.hero = { x: B.starts[0].x, y: B.starts[0].y };
     B.trail = [{ x: B.hero.x, y: B.hero.y }];
   }
+  /* where the fight happens (presentation only): shallow floors are out in the open,
+     the deeper you go the further underground */
+  function pickLocation(rng, node) {
+    if (node.type === "boss") return "boss";
+    const row = node.row || 0;
+    const table = row <= 1 ? [["forest", 3], ["vista", 3], ["city", 2]]
+      : row <= 3 ? [["city", 3], ["forest", 2], ["tunnel", 2], ["vista", 1]]
+      : [["tunnel", 3], ["temple", 3], ["city", 1]];
+    let r = rng() * table.reduce((s, t) => s + t[1], 0);
+    for (const [id, w] of table) { r -= w; if (r < 0) return id; }
+    return table[0][0];
+  }
   function genBattle(run, node) {
     const rng = run.rng;
     const B = { w: BAL.GW, h: BAL.GH, tiles: new Array(BAL.GW * BAL.GH).fill(0), enemies: [], hero: { x: 3, y: 7 }, trail: [], turn: 1, kind: node.type, isBoss: node.type === "boss", phase2: false, uidSeq: 0, row: node.row, bst: { chain: 0, weak: 0, bumps: 0, multi: 0, guardHits: 0, friendly: 0 }, objectives: [] };
     B.trail = [{ x: 3, y: 7 }];
+    B.loc = pickLocation(rng, node);
     if (B.isBoss) {
       for (const [x, y] of [[0, 4], [6, 4], [1, 0], [5, 0]]) B.tiles[idx(B, x, y)] = 1;
       const boss = makeEnemy(B, "boss", 2, 1, rng);

@@ -579,6 +579,8 @@
   /* ---------- drawing API ---------- */
   const Art = (EL.Art = {
     PAL, C, SPR, TILES,
+    /* register an extra sprite at runtime (rows use the shared palette chars) */
+    defSprite(name, rows) { build(name, rows); },
     spr(ctx, name, x, y, o = {}) {
       const s = SPR[name];
       if (!s) return;
