@@ -118,7 +118,7 @@
       this.interactive = true; this.inputKind = "route";
       this.tiles = new Array(GW * GH).fill(0);
       this.dim = 0; this.reach = null; this.entries = []; this.entryEmph = 0; this.t = 0; this.cursor = null; this.heroTile = null; this.heroHint = 0;
-      this.guards = []; this.teles = []; this.guardEmph = 0; this.heroEnd = null;
+      this.guards = []; this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.walls = [];
     }
     /* raw pointer → route input event (geometry only; legality decided elsewhere) */
     routeInput(phase, p) {
@@ -160,6 +160,7 @@
         ctx.fillStyle = "#140f20"; ctx.fillRect(x * T + 2, y * T + 2, T - 4, T - 4);
         A.spr(ctx, "rock", x * T + T / 2, y * T + T - 4, { s: 3 });
       }
+      this.drawWalls(ctx);
       // corner braziers
       for (const [cx, cy] of [[-4, -4], [this.w + 4, -4], [-4, this.h + 4], [this.w + 4, this.h + 4]]) {
         ctx.fillStyle = C.ink; ctx.fillRect(cx - 5, cy - 5, 10, 10);
@@ -216,6 +217,34 @@
       }
     }
   }
+  /* edge walls: a low stone wall standing on the border between two tiles */
+  BoardView.prototype.drawWalls = function (ctx) {
+    const H = 16; // visible height of the wall face
+    // horizontal walls first (they sit "behind" vertical ones on lower rows)
+    const list = this.walls.slice().sort((a, b) => a.y - b.y || (a.d === "D" ? -1 : 1));
+    for (const w of list) {
+      if (w.d === "D") {
+        const x0 = w.x * T - 2, y0 = (w.y + 1) * T, len = T + 4;
+        ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(x0, y0 + 2, len, 6);
+        ctx.fillStyle = C.ink; ctx.fillRect(x0 - 1, y0 - H - 1, len + 2, H + 5);
+        ctx.fillStyle = "#6a5c86"; ctx.fillRect(x0, y0 - H + 4, len, H);
+        ctx.fillStyle = "#a898c8"; ctx.fillRect(x0, y0 - H, len, 4);
+        ctx.fillStyle = "#e2d8f4"; ctx.fillRect(x0, y0 - H, len, 1);
+        ctx.fillStyle = "#3e3456";
+        for (let i = 6 + ((w.x * 7) % 5); i < len - 2; i += 12) ctx.fillRect(x0 + i, y0 - H + 5, 2, H - 2);
+        ctx.fillRect(x0, y0 - H + 9, len, 1);
+      } else {
+        const x0 = (w.x + 1) * T - 4, y0 = w.y * T - 2, len = T + 4;
+        ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(x0 + 6, y0 + 4, 4, len);
+        ctx.fillStyle = C.ink; ctx.fillRect(x0 - 1, y0 - H - 1, 10, len + H + 2);
+        ctx.fillStyle = "#6a5c86"; ctx.fillRect(x0, y0 - H + 4, 8, len + H - 4);
+        ctx.fillStyle = "#a898c8"; ctx.fillRect(x0, y0 - H, 8, len);
+        ctx.fillStyle = "#e2d8f4"; ctx.fillRect(x0, y0 - H, 1, len);
+        ctx.fillStyle = "#3e3456";
+        for (let i = 8 + ((w.y * 5) % 7); i < len - 2; i += 12) ctx.fillRect(x0, y0 - H + i, 8, 2);
+      }
+    }
+  };
   /* enemy attack announcements: tiles that will be struck next enemy phase */
   BoardView.prototype.drawTeles = function (ctx) {
     if (!this.teles.length) return;
@@ -520,6 +549,12 @@
         ctx.fillStyle = C.ink; ctx.fillRect(sx - r - 1, sy - 2, r * 2 + 2, 4); ctx.fillRect(sx - 2, sy - r - 1, 4, r * 2 + 2);
         ctx.fillStyle = "#fff6df"; ctx.fillRect(sx - r, sy - 1, r * 2, 2); ctx.fillRect(sx - 1, sy - r, 2, r * 2);
         ctx.fillStyle = "#ffd35a"; ctx.fillRect(sx - 3, sy - 3, 6, 6);
+      }
+      if (p.bump) {
+        const bx = c.x - 11, by = c.y + 8;
+        ctx.fillStyle = C.ink; ctx.fillRect(bx - 1, by - 1, 24, 14);
+        ctx.fillStyle = "#8a5a10"; ctx.fillRect(bx, by, 22, 12);
+        A.text(ctx, "-" + p.bump, bx + 11, by + 2, { s: 1, align: "center", color: "#ffe9a8" });
       }
     }
   };
@@ -1643,7 +1678,8 @@
     { t: "敵を切り抜ける", b: "道の途中に敵がいれば、通り抜けざまに斬る。倒しきれなかった敵は進行方向へ2マス押し出される。終点は空きマスで。", demo: "attack" },
     { t: "ウィークサイド", b: "盾に囲まれていない光る側面が弱点。矢印の方向からまっすぐ突っ込むと大ダメージ。", demo: "weak" },
     { t: "警戒", b: "敵の盾側の上下左右（点線のマス）は警戒エリア。踏み込むと敵1体につき1回ダメージ。斜めのマスは安全（ただし弱点ボーナスもなし）。", demo: "guard" },
-    { t: "押し出しともつれ", b: "押された敵は壁・足跡・敵にぶつかると衝突ダメージ。敵にぶつかると同じマスに絡まり「もつれ」になる（移動+1）。もつれは警戒せず、斬れば全員が弱点ダメージ。", demo: "push" },
+    { t: "押し出しともつれ", b: "押された敵は壁・岩・敵にぶつかると衝突ダメージ。残りの移動が多いほど強くぶつかる。敵にぶつかると同じマスに絡まり「もつれ」になる（移動+1）。もつれは警戒せず、斬れば全員が弱点ダメージ。", demo: "push" },
+    { t: "岩と壁", b: "岩はマスごと塞ぐが、岩と岩の斜めのすき間は通れる。石の壁はマスの辺だけを塞ぐ。壁ごしには進めず、押された敵も壁で止まる。", demo: "wall" },
     { t: "攻撃予告", b: "赤いマスは次の敵ターンに攻撃が来る場所。そこで終わると被弾。敵を押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
     { t: "撃破で移動回復", b: "敵を倒すたびに移動力が回復する。倒して、進んで、また倒す。長い連鎖が勝利への近道。", demo: "chain" },
     { t: "燠火の足跡", b: "歩いたマスは燃えて、しばらく入れない。斜めに交差するのはOK。敵がいたマスは燃えないので、もう一度踏み込める。仲間が増えるほど足跡は長く残る。", demo: "ember" },
@@ -1676,7 +1712,7 @@
       const S = 40, ox = 60, oy = 130;
       const cell = (x, y) => ({ x: ox + x * S + S / 2, y: oy + y * S + S / 2 });
       for (let y = 0; y < 6; y++) for (let x = 0; x < 6; x++) { ctx.fillStyle = (x + y) % 2 ? "#2c2444" : "#322a4c"; ctx.fillRect(ox + x * S, oy + y * S, S - 2, S - 2); }
-      const path = { route: [[1, 5], [1, 4], [2, 3], [3, 3], [4, 2], [4, 1]], attack: [[1, 4], [2, 4], [3, 4], [4, 4]], weak: [[2, 5], [2, 4], [2, 3], [2, 2]], chain: [[0, 4], [1, 3], [2, 3], [3, 2], [4, 2], [5, 1]], ember: [[1, 5], [1, 4], [2, 3], [3, 4], [3, 5], [2, 4].slice(), [1, 3]], pressure: [], comp: [[1, 5], [1, 4], [1, 3], [2, 3], [3, 3]] }[kind] || [];
+      const path = { route: [[1, 5], [1, 4], [2, 3], [3, 3], [4, 2], [4, 1]], attack: [[1, 4], [2, 4], [3, 4], [4, 4]], weak: [[2, 5], [2, 4], [2, 3], [2, 2]], chain: [[0, 4], [1, 3], [2, 3], [3, 2], [4, 2], [5, 1]], ember: [[1, 5], [1, 4], [2, 3], [3, 4], [3, 5], [2, 4].slice(), [1, 3]], pressure: [], comp: [[1, 5], [1, 4], [1, 3], [2, 3], [3, 3]], wall: [[1, 5], [2, 4], [2, 3], [2, 2], [3, 2]] }[kind] || [];
       const prog = (t % 3200) / 2400;
       const n = Math.min(path.length, Math.floor(prog * path.length) + 1);
       ctx.fillStyle = kind === "ember" ? C.ember : C.cream;
@@ -1721,6 +1757,16 @@
         A.spr(ctx, "husk", me.x - (ex >= 4 ? 8 : 0), me.y + 16, { s: 2 });
         if (ex >= 4) { ctx.fillStyle = "#b08cff"; ctx.fillRect(other.x - 16, other.y + 4, 32, 4); A.jp(ctx, "もつれ！ 移動+1", other.x - 20, other.y - 48, { size: 16, align: "center", color: "#e9dcff" }); }
         A.spr(ctx, "kai", hero.x, hero.y + 16, { s: 2 });
+      }
+      if (kind === "wall") {
+        for (const [x, y] of [[1, 4], [2, 5]]) { const c = cell(x, y); A.spr(ctx, "rock", c.x, c.y + 16, { s: 2 }); }
+        const w = cell(4, 2);
+        ctx.fillStyle = C.ink; ctx.fillRect(w.x + 17, w.y - 26, 8, 48);
+        ctx.fillStyle = "#7a6c92"; ctx.fillRect(w.x + 18, w.y - 25, 6, 46);
+        const hit = n >= 5;
+        const e = hit ? cell(4, 2) : cell(3, 2);
+        if (!hit) A.spr(ctx, "husk", e.x, e.y + 16, { s: 2 });
+        else { A.spr(ctx, "husk", e.x, e.y + 16, { s: 2 }); A.text(ctx, "-2", e.x, e.y - 30, { s: 2, align: "center", color: "#ffd35a" }); }
       }
       if (kind === "tele") {
         const e = cell(3, 1);

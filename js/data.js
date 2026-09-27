@@ -7,7 +7,7 @@
     trailBase: 5, trailPer: 3, // ember trail length = base + per * companions
     pushDist: 2, // survivors are shoved this many tiles along your line
     tangleMax: 3, // enemies that can pile into one tile
-    bump: 1, // collision damage
+    bump: 1, bumpPerMove: 1 / 3, // collision damage = bump + floor(moves left × bumpPerMove)
     tangleRefund: 1, // moves regained for creating a tangle
     coolMin: 2, // embers always cool at least this many tiles per turn
     deepTurn: 4, // from this turn on, the night deepens: every enemy presses +1

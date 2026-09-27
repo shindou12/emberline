@@ -133,6 +133,26 @@
   const covers = (e, x, y) => x >= e.x && y >= e.y && x < e.x + e.size && y < e.y + e.size;
   const enemyAt = (enemies, x, y) => enemies.find((e) => e.alive && covers(e, x, y)) || null;
 
+  /* edge walls: thin walls on the border between two tiles.
+     Stored as "x,y,R" (between x,y and x+1,y) or "x,y,D" (between x,y and x,y+1). */
+  function wallBetween(B, a, b) {
+    if (!B.walls || !B.walls.size) return false;
+    if (b.x === a.x + 1 && b.y === a.y) return B.walls.has(a.x + "," + a.y + ",R");
+    if (b.x === a.x - 1 && b.y === a.y) return B.walls.has(b.x + "," + b.y + ",R");
+    if (b.y === a.y + 1 && b.x === a.x) return B.walls.has(a.x + "," + a.y + ",D");
+    if (b.y === a.y - 1 && b.x === a.x) return B.walls.has(b.x + "," + b.y + ",D");
+    return false;
+  }
+  /* can something move a→b (one step, 8-dir)? Rocks never pinch a diagonal;
+     walls block a diagonal only when they cut both ways around the corner. */
+  function passable(B, a, b) {
+    if (a.x === b.x || a.y === b.y) return !wallBetween(B, a, b);
+    const c1 = { x: b.x, y: a.y }, c2 = { x: a.x, y: b.y };
+    const cut1 = wallBetween(B, a, c1) || wallBetween(B, c1, b);
+    const cut2 = wallBetween(B, a, c2) || wallBetween(B, c2, b);
+    return !(cut1 && cut2);
+  }
+
   function makeEnemy(B, type, x, y, rng) {
     const d = D.ENEMIES[type];
     const e = { uid: ++B.uidSeq, type, x, y, size: d.size || 1, hp: d.hp, maxHp: d.hp, atk: d.atk, pressure: d.pressure, weak: "D", alive: true, boss: !!d.boss, tangled: false, tele: null };
@@ -145,7 +165,8 @@
       for (let k = 0; k < e.size; k++) {
         const tx = dx === 0 ? e.x + k : dx > 0 ? e.x + e.size : e.x - 1;
         const ty = dy === 0 ? e.y + k : dy > 0 ? e.y + e.size : e.y - 1;
-        if (!isRock(B, tx, ty)) return true;
+        const ex = dx === 0 ? tx : dx > 0 ? tx - 1 : tx + 1, ey = dy === 0 ? ty : dy > 0 ? ty - 1 : ty + 1;
+        if (!isRock(B, tx, ty) && !wallBetween(B, { x: ex, y: ey }, { x: tx, y: ty })) return true;
       }
       return false;
     });
@@ -161,7 +182,7 @@
       const [x, y] = q.shift();
       for (const [dx, dy] of DIRS8.filter((d) => d[0] === 0 || d[1] === 0)) {
         const nx = x + dx, ny = y + dy;
-        if (isRock(B, nx, ny) || seen.has(idx(B, nx, ny))) continue;
+        if (isRock(B, nx, ny) || seen.has(idx(B, nx, ny)) || wallBetween(B, { x, y }, { x: nx, y: ny })) continue;
         seen.add(idx(B, nx, ny)); q.push([nx, ny]);
       }
     }
@@ -172,7 +193,7 @@
 
   function genBattle(run, node) {
     const rng = run.rng;
-    const B = { w: BAL.GW, h: BAL.GH, tiles: new Array(BAL.GW * BAL.GH).fill(0), enemies: [], hero: { x: 3, y: 7 }, trail: [], turn: 1, kind: node.type, isBoss: node.type === "boss", phase2: false, uidSeq: 0, row: node.row, bst: { chain: 0, weak: 0, bumps: 0, multi: 0, guardHits: 0, friendly: 0 }, objectives: [] };
+    const B = { w: BAL.GW, h: BAL.GH, tiles: new Array(BAL.GW * BAL.GH).fill(0), walls: new Set(), enemies: [], hero: { x: 3, y: 7 }, trail: [], turn: 1, kind: node.type, isBoss: node.type === "boss", phase2: false, uidSeq: 0, row: node.row, bst: { chain: 0, weak: 0, bumps: 0, multi: 0, guardHits: 0, friendly: 0 }, objectives: [] };
     B.trail = [{ x: 3, y: 7 }];
     if (B.isBoss) {
       for (const [x, y] of [[0, 4], [6, 4], [1, 0], [5, 0]]) B.tiles[idx(B, x, y)] = 1;
@@ -187,13 +208,34 @@
       return B;
     }
     // rocks
-    const nRocks = ri(rng, 3, 5);
+    B.walls = new Set();
+    const nRocks = ri(rng, 1, 3);
     for (let tries = 0, placed = 0; placed < nRocks && tries < 200; tries++) {
       const x = ri(rng, 0, B.w - 1), y = ri(rng, 0, 6);
       if (Math.abs(x - 3) <= 1 && y >= 6) continue;
       if (B.tiles[idx(B, x, y)]) continue;
       B.tiles[idx(B, x, y)] = 1;
       if (!connected(B, 3, 7)) { B.tiles[idx(B, x, y)] = 0; continue; }
+      placed++;
+    }
+    // edge walls: short straight runs (1-2 edges), sometimes bent into an L
+    const nWalls = ri(rng, 2, 4);
+    for (let tries = 0, placed = 0; placed < nWalls && tries < 200; tries++) {
+      const vert = rng() < 0.5;
+      const x = ri(rng, 0, B.w - (vert ? 2 : 1)), y = ri(rng, 0, vert ? 6 : 5);
+      const len = rng() < 0.45 ? 2 : 1;
+      const keys = [];
+      for (let k = 0; k < len; k++) keys.push(vert ? `${x},${y + k},R` : `${x + k},${y},D`);
+      if (rng() < 0.3) keys.push(vert ? `${x},${y},D` : `${x},${y},R`);
+      const ok = keys.every((k) => {
+        const [kx, ky, d] = k.split(","); const X = +kx, Y = +ky;
+        if (d === "R" ? X >= B.w - 1 : Y >= B.h - 1) return false;
+        if (Y >= 6 && Math.abs(X - 3) <= 1) return false; // keep the start open
+        return !B.walls.has(k);
+      });
+      if (!ok) continue;
+      keys.forEach((k) => B.walls.add(k));
+      if (!connected(B, 3, 7)) { keys.forEach((k) => B.walls.delete(k)); continue; }
       placed++;
     }
     // enemies
@@ -236,7 +278,7 @@
     const dx = b.x - a.x, dy = b.y - a.y;
     if (Math.max(Math.abs(dx), Math.abs(dy)) !== 1) return "far";
     if (isRock(B, b.x, b.y)) return "rock";
-    if (dx !== 0 && dy !== 0 && isRock(B, a.x + dx, a.y) && isRock(B, a.x, a.y + dy)) return "squeeze";
+    if (!passable(B, a, b)) return "wall";
     if (blocked.has(idx(B, b.x, b.y))) return "ember";
     if (moves < 1) return "moves";
     return "";
@@ -265,12 +307,13 @@
 
   /* Guard zone (replaces counterattacks): the tiles orthogonally next to an
      enemy's shielded sides. Stepping in costs HP once per enemy per route. */
-  function inGuard(enemies, e, t) {
+  function inGuard(enemies, e, t, B) {
     if (!e.alive || e.tangled || e.atk <= 0) return false;
     if (covers(e, t.x, t.y)) return false;
     const nx = Math.max(e.x, Math.min(e.x + e.size - 1, t.x)), ny = Math.max(e.y, Math.min(e.y + e.size - 1, t.y));
     const dx = t.x - nx, dy = t.y - ny;
     if (Math.abs(dx) + Math.abs(dy) !== 1) return false; // orthogonal sides only: diagonals are a safe, plain approach
+    if (B && wallBetween(B, { x: nx, y: ny }, t)) return false; // a wall shields you from its gaze
     if (sealedBy(enemies, e)) return true;
     const w = CARD[e.weak];
     return dx * w[0] + dy * w[1] <= 0;
@@ -280,7 +323,7 @@
     for (const e of enemies) {
       if (!e.alive || e.tangled || e.atk <= 0) continue;
       for (let y = e.y - 1; y <= e.y + e.size; y++) for (let x = e.x - 1; x <= e.x + e.size; x++) {
-        if (isRock(B, x, y) || !inGuard(enemies, e, { x, y })) continue;
+        if (isRock(B, x, y) || !inGuard(enemies, e, { x, y }, B)) continue;
         out.push({ x, y, uid: e.uid, dmg: e.atk });
       }
     }
@@ -301,11 +344,15 @@
     if (!sx && !sy) sy = 1;
     const tiles = [];
     switch (d.tele) {
-      case "adjacent": tiles.push([sx, sy]); break;
+      case "adjacent": if (passable(B, e, { x: e.x + sx, y: e.y + sy })) tiles.push([sx, sy]); break;
       case "line": {
         const alongX = Math.abs(h.x - cx) >= Math.abs(h.y - cy);
         const dx = alongX ? sx || 1 : 0, dy = alongX ? 0 : sy || 1;
-        for (let k = 1; k <= 3; k++) { if (isRock(B, e.x + dx * k, e.y + dy * k)) break; tiles.push([dx * k, dy * k]); }
+        for (let k = 1; k <= 3; k++) {
+          const p0 = { x: e.x + dx * (k - 1), y: e.y + dy * (k - 1) }, p1 = { x: e.x + dx * k, y: e.y + dy * k };
+          if (isRock(B, p1.x, p1.y) || wallBetween(B, p0, p1)) break;
+          tiles.push([dx * k, dy * k]);
+        }
         break;
       }
       case "cross": for (const [ox, oy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) tiles.push([sx + ox, sy + oy]); break;
@@ -452,7 +499,7 @@
       let stop = null, other = [];
       for (let k = 0; k < n; k++) {
         const t = { x: e.x + d[0], y: e.y + d[1] };
-        if (isRock(B, t.x, t.y) || (d[0] && d[1] && isRock(B, e.x + d[0], e.y) && isRock(B, e.x, e.y + d[1]))) { stop = "wall"; break; }
+        if (isRock(B, t.x, t.y) || !passable(B, e, t)) { stop = "wall"; break; }
         if (ember.has(idx(B, t.x, t.y))) { stop = "ember"; break; }
         const occ = enemiesAt(st.enemies, t.x, t.y).filter((o) => o !== e);
         if (occ.length) {
@@ -465,9 +512,10 @@
         }
         e.x = t.x; e.y = t.y; path.push({ x: t.x, y: t.y });
       }
-      push({ type: "push", uid: e.uid, from, path, stop, dir: d });
-      rec.pushes.push({ uid: e.uid, from, path, stop, dir: d });
-      const bump = BAL.bump * (has(run, "impact") ? 2 : 1);
+      // momentum: the more moves you still carry, the harder the slam
+      const bump = (BAL.bump + Math.floor(T.moves * BAL.bumpPerMove)) * (has(run, "impact") ? 2 : 1);
+      push({ type: "push", uid: e.uid, from, path, stop, dir: d, bump: stop ? bump : 0 });
+      rec.pushes.push({ uid: e.uid, from, path, stop, dir: d, bump: stop ? bump : 0 });
       if (!stop) return;
       T.bumps++;
       if (stop === "tangle") {
@@ -592,7 +640,7 @@
 
       // 1. stepping into guard zones
       for (const e of alive()) {
-        if (T.guarded.has(e.uid) || !inGuard(st.enemies, e, b)) continue;
+        if (T.guarded.has(e.uid) || !inGuard(st.enemies, e, b, B)) continue;
         T.guarded.add(e.uid); T.guardEntered++;
         if (has(run, "aegis") && diag) { push({ type: "guardBlocked", uid: e.uid, reason: "aegis" }); rec.guards.push({ uid: e.uid, blocked: true }); continue; }
         if (T.guardBlock > 0) { T.guardBlock--; push({ type: "guardBlocked", uid: e.uid, reason: "guard" }); rec.guards.push({ uid: e.uid, blocked: true }); continue; }
@@ -691,7 +739,7 @@
       const [x, y] = q.shift();
       for (const [dx, dy] of DIRS8) {
         const nx = x + dx, ny = y + dy;
-        if (!inB(B, nx, ny) || seen.has(idx(B, nx, ny)) || isRock(B, nx, ny)) continue;
+        if (!inB(B, nx, ny) || seen.has(idx(B, nx, ny)) || isRock(B, nx, ny) || !passable(B, { x, y }, { x: nx, y: ny })) continue;
         seen.add(idx(B, nx, ny));
         if (freeFor(B, nx, ny, self, ember)) return { x: nx, y: ny };
         q.push([nx, ny]);
@@ -823,7 +871,7 @@
         const [x, y] = q.shift();
         for (const [dx, dy] of step4) {
           const nx = x + dx, ny = y + dy, k = idx(B, nx, ny);
-          if (!inB(B, nx, ny) || prev.has(k) || !freeFor(B, nx, ny, e, ember)) continue;
+          if (!inB(B, nx, ny) || prev.has(k) || !freeFor(B, nx, ny, e, ember) || wallBetween(B, { x, y }, { x: nx, y: ny })) continue;
           prev.set(k, idx(B, x, y));
           if (cheb({ x: nx, y: ny }, B.hero) <= 1) { goal = k; break; }
           q.push([nx, ny]);
@@ -839,7 +887,7 @@
       let best = null, bd = cheb(e, B.hero);
       for (const [dx, dy] of step4) {
         const t = { x: e.x + dx, y: e.y + dy };
-        if (!inB(B, t.x, t.y) || !freeFor(B, t.x, t.y, e, ember)) continue;
+        if (!inB(B, t.x, t.y) || !freeFor(B, t.x, t.y, e, ember) || wallBetween(B, e, t)) continue;
         const dd = cheb(t, B.hero);
         if (dd > bd) { bd = dd; best = t; }
       }
@@ -1005,7 +1053,7 @@
 
   EL.Logic = {
     CARD, CW, DIRS8, rngFrom, createRun, stats, genMap, nextNodes, genBattle,
-    blockedSet, stepError, isWeakEntry, sealedBy, enemyAt, enemiesAt, covers, isRock, idx, inB,
+    blockedSet, stepError, wallBetween, passable, isWeakEntry, sealedBy, enemyAt, enemiesAt, covers, isRock, idx, inB,
     simulate, commitRoute, enemyPhase, genRewards, applyReward, heal, reachable, weakEntries,
     condReq, condProgress, pressureOf, enemyPressure, has, coolCount, canMove, unstick,
     inGuard, guardTiles, teleTiles, teleDmgAt, planTelegraphs, pushDist,
