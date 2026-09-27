@@ -160,7 +160,6 @@
         ctx.fillStyle = "#140f20"; ctx.fillRect(x * T + 2, y * T + 2, T - 4, T - 4);
         A.spr(ctx, "rock", x * T + T / 2, y * T + T - 4, { s: 3 });
       }
-      this.drawWalls(ctx);
       // corner braziers
       for (const [cx, cy] of [[-4, -4], [this.w + 4, -4], [-4, this.h + 4], [this.w + 4, this.h + 4]]) {
         ctx.fillStyle = C.ink; ctx.fillRect(cx - 5, cy - 5, 10, 10);
@@ -217,34 +216,67 @@
       }
     }
   }
-  /* edge walls: a low stone wall standing on the border between two tiles */
-  BoardView.prototype.drawWalls = function (ctx) {
+  /* edge walls: a low stone wall standing on the border between two tiles
+     (drawn by DepthSortView so it overlaps units correctly; board-local coords) */
+  function drawWall(ctx, w) {
     const H = 16; // visible height of the wall face
-    // horizontal walls first (they sit "behind" vertical ones on lower rows)
-    const list = this.walls.slice().sort((a, b) => a.y - b.y || (a.d === "D" ? -1 : 1));
-    for (const w of list) {
-      if (w.d === "D") {
-        const x0 = w.x * T - 2, y0 = (w.y + 1) * T, len = T + 4;
-        ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(x0, y0 + 2, len, 6);
-        ctx.fillStyle = C.ink; ctx.fillRect(x0 - 1, y0 - H - 1, len + 2, H + 5);
-        ctx.fillStyle = "#6a5c86"; ctx.fillRect(x0, y0 - H + 4, len, H);
-        ctx.fillStyle = "#a898c8"; ctx.fillRect(x0, y0 - H, len, 4);
-        ctx.fillStyle = "#e2d8f4"; ctx.fillRect(x0, y0 - H, len, 1);
-        ctx.fillStyle = "#3e3456";
-        for (let i = 6 + ((w.x * 7) % 5); i < len - 2; i += 12) ctx.fillRect(x0 + i, y0 - H + 5, 2, H - 2);
-        ctx.fillRect(x0, y0 - H + 9, len, 1);
-      } else {
-        const x0 = (w.x + 1) * T - 4, y0 = w.y * T - 2, len = T + 4;
-        ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(x0 + 6, y0 + 4, 4, len);
-        ctx.fillStyle = C.ink; ctx.fillRect(x0 - 1, y0 - H - 1, 10, len + H + 2);
-        ctx.fillStyle = "#6a5c86"; ctx.fillRect(x0, y0 - H + 4, 8, len + H - 4);
-        ctx.fillStyle = "#a898c8"; ctx.fillRect(x0, y0 - H, 8, len);
-        ctx.fillStyle = "#e2d8f4"; ctx.fillRect(x0, y0 - H, 1, len);
-        ctx.fillStyle = "#3e3456";
-        for (let i = 8 + ((w.y * 5) % 7); i < len - 2; i += 12) ctx.fillRect(x0, y0 - H + i, 8, 2);
-      }
+    if (w.d === "D") {
+      const x0 = w.x * T - 2, y0 = (w.y + 1) * T, len = T + 4;
+      ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(x0, y0 + 2, len, 6);
+      ctx.fillStyle = C.ink; ctx.fillRect(x0 - 1, y0 - H - 1, len + 2, H + 5);
+      ctx.fillStyle = "#6a5c86"; ctx.fillRect(x0, y0 - H + 4, len, H);
+      ctx.fillStyle = "#a898c8"; ctx.fillRect(x0, y0 - H, len, 4);
+      ctx.fillStyle = "#e2d8f4"; ctx.fillRect(x0, y0 - H, len, 1);
+      ctx.fillStyle = "#3e3456";
+      for (let i = 6 + ((w.x * 7) % 5); i < len - 2; i += 12) ctx.fillRect(x0 + i, y0 - H + 5, 2, H - 2);
+      ctx.fillRect(x0, y0 - H + 9, len, 1);
+    } else {
+      const x0 = (w.x + 1) * T - 4, y0 = w.y * T - 2, len = T + 4;
+      ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(x0 + 8, y0 + 4, 4, len);
+      ctx.fillStyle = C.ink; ctx.fillRect(x0 - 1, y0 - H - 1, 10, len + H + 2);
+      ctx.fillStyle = "#6a5c86"; ctx.fillRect(x0, y0 - H + 4, 8, len + H - 4);
+      ctx.fillStyle = "#a898c8"; ctx.fillRect(x0, y0 - H, 8, len);
+      ctx.fillStyle = "#e2d8f4"; ctx.fillRect(x0, y0 - H, 1, len);
+      ctx.fillStyle = "#3e3456";
+      for (let i = 8 + ((w.y * 5) % 7); i < len - 2; i += 12) ctx.fillRect(x0, y0 - H + i, 8, 2);
     }
-  };
+  }
+  V.drawWall = drawWall;
+
+  /* units, enemies and edge walls drawn back-to-front by where they stand */
+  class DepthSortView extends EL.Node {
+    constructor(board) { super("DepthSorted"); this.board = board; }
+    render(ctx) {
+      if (!this.visible || this.alpha <= 0.003) return;
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      const items = [];
+      let n = 0;
+      for (const g of this.children) {
+        if (!g.visible) continue;
+        for (const c of g.children) items.push({ d: c.depth ? c.depth() : c.y, n: n++, node: c });
+      }
+      for (const w of this.board.walls) {
+        // a wall on a tile's lower edge sits between that row and the next; a side wall belongs to its row
+        const d = BY + (w.y + 1) * T + (w.d === "D" ? 0 : -1);
+        items.push({ d, n: n++, wall: w });
+      }
+      items.sort((a, b) => a.d - b.d || a.n - b.n);
+      for (const it of items) {
+        if (it.node) { it.node.render(ctx); continue; }
+        ctx.save(); ctx.translate(BX, BY); drawWall(ctx, it.wall); ctx.restore();
+      }
+      for (const g of this.children) {
+        if (!g.visible) continue;
+        for (const c of g.children) {
+          if (!c.drawUI || c.alpha <= 0.003) continue;
+          ctx.save(); ctx.globalAlpha *= g.alpha * c.alpha; c.drawUI(ctx); ctx.restore();
+        }
+      }
+      ctx.restore();
+    }
+  }
+  V.DepthSortView = DepthSortView;
   /* enemy attack announcements: tiles that will be struck next enemy phase */
   BoardView.prototype.drawTeles = function (ctx) {
     if (!this.teles.length) return;
@@ -611,6 +643,7 @@
     }
     tick(dt) { this.t += dt; this.shownHp += (this.hp - this.shownHp) * Math.min(1, dt / 90); }
     rect() { return { x: BX + this.tx * T, y: BY + this.ty * T, s: T * this.size }; }
+    depth() { return BY + (this.ty + this.size) * T - 6; }
     draw(ctx) {
       if (this.dead) return;
       const r = this.rect();
@@ -655,6 +688,11 @@
         ctx.fillStyle = "#b08cff"; ctx.fillRect(r.x + r.s - 14, r.y + 5, 8, 8);
         ctx.fillStyle = "#e9dcff"; ctx.fillRect(r.x + r.s - 12 + k * 2, r.y + 7, 2, 4);
       }
+    }
+    /* HP bar and aim markers: drawn after the depth-sorted pass so walls never hide them */
+    drawUI(ctx) {
+      if (this.dead || !this.visible) return;
+      const r = this.rect();
       this.drawHp(ctx, r);
       if (this.target) this.drawTarget(ctx, r);
     }

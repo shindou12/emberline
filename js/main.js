@@ -27,8 +27,9 @@
     v.board = battleWorld.add(new V.BoardView());
     v.footprints = battleWorld.add(new V.FootprintView());
     v.route = battleWorld.add(new V.RoutePreviewView());
-    v.enemies = battleWorld.add(new EL.Node("Enemies"));
-    v.units = battleWorld.add(new EL.Node("Units")); // companions + player
+    const depth = battleWorld.add(new V.DepthSortView(v.board)); // y-sorted: enemies, units, edge walls
+    v.enemies = depth.add(new EL.Node("Enemies"));
+    v.units = depth.add(new EL.Node("Units")); // companions + player
     v.fx = battleWorld.add(new V.FXView("BattleEffects"));
     v.mapView = worldLayer.add(new V.MapView());
 
