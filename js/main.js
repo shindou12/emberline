@@ -30,6 +30,7 @@
     const depth = battleWorld.add(new V.DepthSortView()); // y-sorted: enemies and units
     v.enemies = depth.add(new EL.Node("Enemies"));
     v.units = depth.add(new EL.Node("Units")); // companions + player
+    v.routeTop = battleWorld.add(new V.RouteTopView(v.route)); // route x-ray above units
     v.fx = battleWorld.add(new V.FXView("BattleEffects"));
     v.mapView = worldLayer.add(new V.MapView());
 

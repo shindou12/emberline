@@ -156,6 +156,7 @@
       const v = this.v, B = this.B, run = this.run;
       v.board.tiles = B.tiles;
       v.board.loc = B.loc || "temple";
+      v.route.heroSprite = D.HEROES[run.heroId].sprite;
       v.footprints.trail = B.trail.map((t) => ({ x: t.x, y: t.y }));
       v.footprints.births.clear(); v.footprints.ashes = [];
       v.route.pts = []; v.route.skillMarks = []; v.route.areas = [];
@@ -449,10 +450,64 @@
       else if (this.route.length > 1) this.hint("指を離して、出撃ボタンで実行");
       else this.hint("光る側面からまっすぐ突っ込め");
     }
+    /* tap-to-move: extend the route from its tip to `tile` (straight first, else the shortest legal detour) */
+    routeTo(tile) {
+      const B = this.B, r = this.route;
+      if (r.some((t) => sameTile(t, tile))) { this.tryExtend(tile); return; } // tapping the route rewinds it
+      const snapshot = r.slice();
+      this.tryExtend(tile);
+      if (sameTile(this.route[this.route.length - 1], tile)) return;
+      // the straight walk got stuck: search a detour around embers and rocks
+      this.route = snapshot; this.preview = L.simulate(B, this.run, this.route);
+      const start = this.route[this.route.length - 1];
+      const blocked = L.blockedSet(B, this.route, this.preview.T.cold);
+      const key = (t) => t.x + "," + t.y, prev = new Map([[key(start), null]]), q = [start];
+      const order = [[0, -1], [1, 0], [0, 1], [-1, 0], [1, -1], [1, 1], [-1, 1], [-1, -1]];
+      while (q.length && !prev.has(key(tile))) {
+        const c = q.shift();
+        for (const [dx, dy] of order) {
+          const n = { x: c.x + dx, y: c.y + dy };
+          if (prev.has(key(n)) || L.stepError(B, blocked, 99, c, n)) continue;
+          prev.set(key(n), c); q.push(n);
+        }
+      }
+      if (!prev.has(key(tile))) { this.tryExtend(tile); return; } // unreachable: show why
+      const path = [];
+      for (let t = tile; t && !sameTile(t, start); t = prev.get(key(t))) path.unshift(t);
+      let added = 0;
+      for (const n of path) {
+        if (this.preview.outcome !== "ok") break;
+        const cur = this.route[this.route.length - 1];
+        if (L.stepError(B, L.blockedSet(B, this.route, this.preview.T.cold), this.preview.T.moves, cur, n)) break;
+        this.route.push(n); added++;
+        this.preview = L.simulate(B, this.run, this.route);
+      }
+      if (added) { S.play("step", this.route.length - 1); this.updatePreview(); }
+      if (!sameTile(this.route[this.route.length - 1], tile)) { S.play("invalid"); this.hint("移動力が足りない — 撃破で回復する"); }
+    }
+    enemyInfo(e) {
+      const B = this.B, info = D.ENEMIES[e.type];
+      const wk = { U: "上", D: "下", L: "左", R: "右" }[e.weak];
+      const sealed = L.sealedBy(B.enemies, e);
+      const tele = e.tele && !e.tangled ? `・予告${e.tele.dmg}` : "";
+      this.toast(`${info.name}　HP${e.hp}/${e.maxHp}`, `反撃${e.atk}${tele}・圧${L.enemyPressure(this.run, B, e)}・弱点：${sealed ? "封印中" : wk + "側"}${e.tangled ? "・もつれ中" : ""}\n${info.desc}`);
+    }
+    /* a tap (short) plans a route; a long press on an enemy explains it */
+    tapPlan(d) {
+      const B = this.B;
+      if (!this.tapTile || !d.tile || !sameTile(this.tapTile, d.tile)) return;
+      const e = L.enemyAt(B.enemies, d.tile.x, d.tile.y);
+      if (EL.Time.ui - this.tapT > 420) { if (e) this.enemyInfo(e); return; }
+      if (sameTile(d.tile, B.hero) && this.state === "Battle.Idle") return;
+      if (this.state === "Battle.Idle") { this.beginRoute(); this.setDragUI(true); }
+      this.routeTo(d.tile);
+      this.finishRoute();
+    }
     enemyTile(uid) { const e = this.B.enemies.find((x) => x.uid === uid); return e ? { x: e.x, y: e.y } : { x: 0, y: 0 }; }
     setDragUI(on) {
       const v = this.v;
       EL.tween(v.board, { dim: on ? 1 : 0, entryEmph: on ? 1 : 0, guardEmph: on ? 1 : 0 }, 180, { clock: "ui" });
+      EL.tween(v.footprints, { alpha: on ? 0.55 : 1 }, 180, { clock: "ui" }); // old embers step back while planning
       for (const k in this.enemyViews) EL.tween(this.enemyViews[k], { emph: on ? 1 : 0 }, 180, { clock: "ui" });
       if (!on) {
         v.board.entries = []; v.board.reach = null;
@@ -1189,8 +1244,8 @@
         v.hero.aura = 0; v.hero.shield = 0;
         this.coolPreview();
         v.route.pts = [];
-        if (this.startOpen()) this.hint("光るマスのどれからでも、なぞって出発できる");
-        else this.hint(this.first ? "主人公から指でなぞってルートを描こう" : `ルートを描いて切り抜けろ — 残り${B.enemies.length}体`);
+        if (this.startOpen()) this.hint("光るマスからなぞるか、行き先をタップ");
+        else this.hint(this.first ? "なぞるか、行き先のマスをタップしてルートを作ろう" : `ルートを描いて切り抜けろ — 残り${B.enemies.length}体`);
         // boxed in by embers? the oldest embers crumble until a way opens
         if (!L.canMove(B)) {
           const cooled = L.unstick(B);
@@ -1222,20 +1277,9 @@
           if (spot) { this.moveStart(spot); this.go("Battle.Dragging"); return; }
           const grabbed = (d.tile && sameTile(d.tile, B.hero)) || Math.hypot(d.px - hc.x, d.py - hc.y) < V.GEO.T * 0.85;
           if (grabbed) { this.go("Battle.Dragging"); return; }
-          this.tapTile = d.tile;
+          this.tapTile = d.tile; this.tapT = EL.Time.ui;
         } else if (d.phase === "end") {
-          if (this.tapTile && d.tile && sameTile(this.tapTile, d.tile)) {
-            const e = L.enemyAt(B.enemies, d.tile.x, d.tile.y);
-            if (e) {
-              const info = D.ENEMIES[e.type];
-              const wk = { U: "上", D: "下", L: "左", R: "右" }[e.weak];
-              const sealed = L.sealedBy(B.enemies, e);
-              const tele = e.tele && !e.tangled ? `・予告${e.tele.dmg}` : "";
-              this.toast(`${info.name}　HP${e.hp}/${e.maxHp}`, `反撃${e.atk}${tele}・圧${e.pressure}・弱点：${sealed ? "封印中" : wk + "側"}${e.tangled ? "・もつれ中" : ""}\n${info.desc}`);
-            } else if (d.tile) {
-              this.hint("主人公（光っているマス）からなぞって始める");
-            }
-          }
+          this.tapPlan(d);
           this.tapTile = null;
         }
       },
@@ -1281,13 +1325,16 @@
           if (d.id === "route.redo") { S.play("cancel"); this.setDragUI(false); this.go("Battle.Idle"); }
           return;
         }
-        if (evt.type !== "route.input" || d.phase !== "begin") return;
+        if (evt.type !== "route.input") return;
+        if (d.phase === "end") { this.tapPlan(d); this.tapTile = null; return; }
+        if (d.phase !== "begin") return;
         const B = this.B, tip = this.route[this.route.length - 1];
         const near = (t) => { const c = tc(t.x, t.y); return Math.hypot(d.px - c.x, d.py - c.y) < V.GEO.T * 0.7; };
         const spot = this.startAt(d);
         if (near(tip)) this.go("Battle.Dragging", this.route);
         else if (spot) { this.setDragUI(false); this.moveStart(spot); this.go("Battle.Dragging"); }
         else if (near(B.hero)) this.go("Battle.Dragging");
+        else { this.tapTile = d.tile; this.tapT = EL.Time.ui; }
       },
     },
 

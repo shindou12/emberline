@@ -10,6 +10,7 @@
   const tc = (x, y) => ({ x: BX + x * T + T / 2, y: BY + y * T + T / 2 });
   V.tc = tc;
   const DIRV = { U: [0, -1], R: [1, 0], D: [0, 1], L: [-1, 0] };
+  const ROUTE = "#aef4ff"; // the planned route: a colour nothing else on the board uses
   const hash = (x, y) => ((x * 73856093) ^ (y * 19349663)) >>> 0;
 
   /* ================= generic ================= */
@@ -405,7 +406,7 @@
     draw(ctx) {
       const pts = this.pts;
       if (pts.length < 1) return;
-      const main = this.dead ? "#ff4d5e" : C.cream;
+      const main = this.dead ? "#ff4d5e" : ROUTE;
       // areas (skills that would fire)
       for (const ar of this.areas) {
         const fl = 0.5 + 0.5 * Math.sin(this.t / 90);
@@ -428,13 +429,17 @@
         }
       }
       // line
+      const n = pts.length - 1;
       for (let k = 1; k < pts.length; k++) {
         const a = tc(pts[k - 1].x, pts[k - 1].y), b = tc(pts[k].x, pts[k].y);
         const done = k <= this.consumed;
         ctx.fillStyle = C.ink;
-        A.pline(ctx, a.x, a.y, b.x, b.y, 8);
-        ctx.fillStyle = done ? "rgba(255,246,223,0.25)" : main;
-        A.pline(ctx, a.x, a.y, b.x, b.y, 4);
+        A.pline(ctx, a.x, a.y, b.x, b.y, 10);
+        // older segments fade so the order (and the tip) reads at a glance
+        ctx.globalAlpha = done ? 0.25 : 0.55 + 0.45 * (k / n);
+        ctx.fillStyle = main;
+        A.pline(ctx, a.x, a.y, b.x, b.y, 6);
+        ctx.globalAlpha = 1;
       }
       // marching light along the line
       if (pts.length > 1 && !this.consumed) {
@@ -467,19 +472,6 @@
         ctx.fillRect(c.x + dx * 12 - 1, c.y + dy * 12 - 1, 2, 2);
       }
       const tip = pts[pts.length - 1];
-      if (tip) {
-        const c = tc(tip.x, tip.y);
-        const bx = c.x + 14, by = c.y - 30;
-        const col = this.endMoves > 0 ? C.move : "#ff8f8f";
-        ctx.fillStyle = C.ink; ctx.fillRect(bx - 2, by, 24, 20); ctx.fillRect(bx, by - 2, 20, 24);
-        ctx.fillStyle = "#1c2744"; ctx.fillRect(bx, by, 20, 20);
-        ctx.fillStyle = col; ctx.fillRect(bx, by, 20, 2);
-        A.text(ctx, String(this.endMoves), bx + 10, by + 5, { s: 2, align: "center", color: col });
-        if (!this.endOk) {
-          ctx.fillStyle = "#ff4d5e";
-          A.text(ctx, "X", c.x, c.y - 6, { s: 3, align: "center", color: "#ff4d5e" });
-        }
-      }
       this.drawPushes(ctx);
       for (const g of this.guardHits) {
         const c = tc(g.x, g.y);
@@ -517,6 +509,49 @@
       }
     }
   }
+  /* drawn above enemies and units: a thin x-ray of the route, direction chevrons,
+     a ghost of the hero at the tip and the remaining-moves bubble */
+  RoutePreviewView.prototype.drawTop = function (ctx) {
+    const pts = this.pts;
+    if (pts.length < 2 || this.consumed) return;
+    const main = this.dead ? "#ff4d5e" : ROUTE;
+    const n = pts.length - 1;
+    for (let k = 1; k < pts.length; k++) {
+      const a = tc(pts[k - 1].x, pts[k - 1].y), b = tc(pts[k].x, pts[k].y);
+      ctx.globalAlpha = 0.35 + 0.5 * (k / n);
+      ctx.fillStyle = main;
+      A.pline(ctx, a.x, a.y, b.x, b.y, 2);
+      // chevron at the middle of each step, pointing the way
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dx = U.sign(b.x - a.x), dy = U.sign(b.y - a.y);
+      const px = -dy, py = dx;
+      ctx.fillStyle = C.ink;
+      for (const s of [-1, 1]) ctx.fillRect(U.snap(mx - dx * 3 + px * s * 4) - 2, U.snap(my - dy * 3 + py * s * 4) - 2, 5, 5);
+      ctx.fillStyle = main;
+      for (const s of [-1, 1]) ctx.fillRect(U.snap(mx - dx * 3 + px * s * 4) - 1, U.snap(my - dy * 3 + py * s * 4) - 1, 3, 3);
+      ctx.fillRect(U.snap(mx + dx * 2) - 2, U.snap(my + dy * 2) - 2, 4, 4);
+    }
+    ctx.globalAlpha = 1;
+    const tip = pts[pts.length - 1], c = tc(tip.x, tip.y);
+    // pulsing ring + ghost hero where the route ends
+    const k = (this.t % 900) / 900;
+    ctx.globalAlpha = 0.8 * (1 - k);
+    ctx.fillStyle = main;
+    A.pellipse(ctx, c.x, c.y + 14, 10 + k * 10, 4 + k * 4);
+    ctx.globalAlpha = 1;
+    if (this.heroSprite && this.endOk && !this.dead) A.spr(ctx, this.heroSprite, c.x, c.y + 18, { s: 2, alpha: 0.5 });
+    const bx = c.x + 14, by = c.y - 30;
+    const col = this.endMoves > 0 ? C.move : "#ff8f8f";
+    ctx.fillStyle = C.ink; ctx.fillRect(bx - 2, by, 24, 20); ctx.fillRect(bx, by - 2, 20, 24);
+    ctx.fillStyle = "#1c2744"; ctx.fillRect(bx, by, 20, 20);
+    ctx.fillStyle = col; ctx.fillRect(bx, by, 20, 2);
+    A.text(ctx, String(this.endMoves), bx + 10, by + 5, { s: 2, align: "center", color: col });
+    if (!this.endOk) A.text(ctx, "X", c.x, c.y - 6, { s: 3, align: "center", color: "#ff4d5e" });
+  };
+  class RouteTopView extends EL.Node {
+    constructor(route) { super("RouteTop"); this.route = route; }
+    draw(ctx) { this.route.drawTop(ctx); }
+  }
+  V.RouteTopView = RouteTopView;
   /* predicted shoves: arrow along the slide, a star where it slams, a knot where it tangles */
   RoutePreviewView.prototype.drawPushes = function (ctx) {
     for (const p of this.pushes) {
@@ -1691,7 +1726,7 @@
   V.PauseView = PauseView;
 
   const HELP = [
-    { t: "ルートを描く", b: "主人公から指をすべらせて、進む道を描く。斜めにも進める。指を離して出撃ボタンで駆け抜ける。戦闘の最初のターンだけは、光る3つのマスのどれからでも出発できる。", demo: "route" },
+    { t: "ルートを描く", b: "主人公から指でなぞるか、行き先のマスをタップして道を作る（斜めもOK）。出撃ボタンで駆け抜ける。最初のターンは光る3マスのどこからでも出発できる。敵は長押しで詳しく見られる。", demo: "route" },
     { t: "敵を切り抜ける", b: "道の途中に敵がいれば、通り抜けざまに斬る。倒しきれなかった敵は進行方向へ2マス押し出される。終点は空きマスで。", demo: "attack" },
     { t: "ウィークサイド", b: "盾に囲まれていない光る側面が弱点。矢印の方向からまっすぐ突っ込むと大ダメージ。", demo: "weak" },
     { t: "反撃", b: "盾のある側から上下左右にまっすぐ斬って、倒しきれないと反撃を受ける。斜めから斬れば反撃されない（弱点ボーナスもなし）。", demo: "guard" },
