@@ -104,7 +104,7 @@
         if (c.comp) c.need = L.condProgress(run, c.comp, this.emptyT()).need;
       });
     }
-    emptyT() { return { dirs: [], kills: 0, dmgTaken: 0, weakHits: 0, tangles: 0, guardEntered: 0, route: [{ x: 0, y: 0 }], marks: {}, uses: {} }; }
+    emptyT() { return { dirs: [], kills: 0, dmgTaken: 0, weakHits: 0, tangles: 0, route: [{ x: 0, y: 0 }], marks: {}, uses: {} }; }
     floorText() {
       if (!this.run.nodeId) return "入口";
       const n = this.run.map.nodes[this.run.nodeId];
@@ -187,7 +187,7 @@
       enemies = enemies || B.enemies;
       bd.teles = [];
       for (const e of enemies) if (e.alive) for (const t of L.teleTiles(B, e)) bd.teles.push({ x: t.x, y: t.y, dmg: e.tele.dmg, uid: e.uid });
-      bd.guards = L.guardTiles(B, enemies);
+      bd.seals = enemies.filter((e) => e.alive && e.type === "totem").map((t) => ({ x: t.x, y: t.y, r: D.BAL.sealRange }));
       bd.heroEnd = heroEnd || B.hero;
     }
     /* enemies sharing a tile (a tangle) fan out a little so each stays readable */
@@ -206,6 +206,20 @@
           EL.tween(ev, { sox, soy }, 180, { clock: "ui", ease: U.ease.outBack });
         });
       }
+    }
+    /* ward pillars during choreography: seal/unseal from what is on screen right now */
+    liveSeals() {
+      const list = Object.values(this.enemyViews).filter((w) => !w.dead).map((w) => ({ x: Math.round(w.tx), y: Math.round(w.ty), type: w.type, boss: w.boss, alive: true }));
+      for (const w of Object.values(this.enemyViews)) {
+        if (w.dead) continue;
+        const s = L.sealedBy(list, { x: Math.round(w.tx), y: Math.round(w.ty), type: w.type, boss: w.boss });
+        if (s === w.sealed) continue;
+        w.sealed = s; w.spin = 0; EL.tween(w, { spin: 1 }, 320);
+        const r = w.rect();
+        this.v.floats.spawn(s ? "封印" : "弱点復活", r.x + r.s / 2, r.y - 8, { kind: "jp", color: s ? "#c9b3ff" : C.emberL, life: 800, vy: -30 });
+        if (!s) this.v.fx.burst(r.x + r.s / 2, r.y + r.s / 2, 14, { speed: [40, 140], life: [250, 500], palette: [C.weak, C.emberL, "#c9b3ff"], size: 2, glow: true });
+      }
+      this.v.board.seals = list.filter((e) => e.type === "totem").map((t) => ({ x: t.x, y: t.y, r: D.BAL.sealRange }));
     }
     objectiveStates() { return this.B.objectives.map((o) => L.objectiveState(this.B, o, false)); }
     rewardName(r) {
@@ -403,7 +417,7 @@
       else if (res.outcome === "victory") this.hint("このルートで全滅できる！");
       else if (res.teleEnd > 0) this.hint(`終点に攻撃予告！ −${res.teleEnd}`);
       else if (res.T.tangles > 0 && !kills) this.hint("もつれた！ 斬れば全員に弱点ダメージ");
-      else if (guardDmg > 0 && res.steps.length <= 3) this.hint(`警戒エリア −${guardDmg} — 弱点側から回り込め`);
+      else if (guardDmg > 0) this.hint(`反撃 −${guardDmg} — 弱点か斜めから斬れば反撃されない`);
       else if (skills) this.hint("仲間の能力が発動する！");
       else if (kills) this.hint(kills === 1 ? `撃破で移動+${L.stats(run).refund} — まだ伸ばせる` : "2体目以降の撃破は移動+1 — 目標を見極めて");
       else if (this.route.length > 1) this.hint("指を離して、出撃ボタンで実行");
@@ -429,7 +443,7 @@
       const res = L.simulate(B, run, route);
       v.route.pts = route.slice(0, res.last + 1); v.route.consumed = 0; v.route.skillMarks = []; v.route.areas = [];
       v.route.pushes = []; v.route.guardHits = []; v.route.teleEnd = 0;
-      v.board.teles = []; v.board.guards = [];
+      v.board.teles = [];
       this.clearTargets();
       v.companionHUD.cards.forEach((c) => { c.ready = false; c.near = false; });
       this.chain = 0;
@@ -525,7 +539,7 @@
       h.red = 1; EL.tween(h, { red: 0 }, 260);
       h.ox = -6; EL.tween(h, { ox: 0 }, 220, { ease: U.ease.outElastic });
       v.floats.spawn("-" + ev.dmg, h.x, h.y - 50, { s: 3, color: "#ff4d5e", life: 800 });
-      v.floats.spawn("警戒", h.x, h.y - 76, { kind: "jp", color: "#ffb0c8", life: 700, vy: -30 });
+      v.floats.spawn("反撃", h.x, h.y - 76, { kind: "jp", color: "#ffb0c8", life: 700, vy: -30 });
       v.fx.burst(h.x, h.y - 16, 14, { speed: [60, 200], life: [200, 420], palette: ["#ff4d5e", "#ff8f9b", "#8f2231"], size: 2, glow: true });
       v.postfx.flashLight(h.x, h.y - 16, 120, "255,70,90", 0.9, 300);
       v.playerHUD.hp = ev.hp; v.playerHUD.shake = 3; v.playerHUD.flash = 0.6;
@@ -540,7 +554,7 @@
     async ev_guardBlocked(ev) {
       const v = this.v, h = v.hero;
       h.shield = 1; EL.tween(h, { shield: 0 }, 380);
-      v.floats.spawn(ev.reason === "aegis" ? "すり抜け" : "BLOCK", h.x, h.y - 52, ev.reason === "aegis" ? { kind: "jp", color: C.move, life: 700 } : { s: 2, color: C.move, life: 700 });
+      v.floats.spawn("BLOCK", h.x, h.y - 52, { s: 2, color: C.move, life: 700 });
       S.play("block");
       await EL.wait(110);
     }
@@ -556,6 +570,7 @@
         await EL.tween(evw, { tx: t.x, ty: t.y }, 70, { ease: U.ease.outQuad });
       }
       this.layoutStacks();
+      this.liveSeals();
     }
     async ev_bump(ev) {
       const v = this.v, evw = this.enemyViews[ev.uid];
@@ -619,6 +634,7 @@
       }
       v.pressureHUD.value = L.pressureOf(this.run, this.B, this.aliveAfterKill(ev.uid));
       if (!scorch) EL.tween(v.combo, { alpha: 0 }, 400, { delay: 1600, clock: "ui" });
+      if (evw.type === "totem" || Object.values(this.enemyViews).some((w) => w.sealed)) this.liveSeals();
       await EL.wait(c >= 3 ? 150 : 100);
     }
     aliveAfterKill(uid) {
@@ -1152,7 +1168,7 @@
               const wk = { U: "上", D: "下", L: "左", R: "右" }[e.weak];
               const sealed = L.sealedBy(B.enemies, e);
               const tele = e.tele && !e.tangled ? `・予告${e.tele.dmg}` : "";
-              this.toast(`${info.name}　HP${e.hp}/${e.maxHp}`, `警戒${e.atk}${tele}・圧${e.pressure}・弱点：${sealed ? "封印中" : wk + "側"}${e.tangled ? "・もつれ中" : ""}\n${info.desc}`);
+              this.toast(`${info.name}　HP${e.hp}/${e.maxHp}`, `反撃${e.atk}${tele}・圧${e.pressure}・弱点：${sealed ? "封印中" : wk + "側"}${e.tangled ? "・もつれ中" : ""}\n${info.desc}`);
             } else if (d.tile) {
               this.hint("主人公（光っているマス）からなぞって始める");
             }

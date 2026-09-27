@@ -118,7 +118,7 @@
       this.interactive = true; this.inputKind = "route";
       this.tiles = new Array(GW * GH).fill(0);
       this.dim = 0; this.reach = null; this.entries = []; this.entryEmph = 0; this.t = 0; this.cursor = null; this.heroTile = null; this.heroHint = 0;
-      this.guards = []; this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.walls = [];
+      this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.walls = []; this.seals = [];
     }
     /* raw pointer → route input event (geometry only; legality decided elsewhere) */
     routeInput(phase, p) {
@@ -191,8 +191,8 @@
           ctx.fillRect(px + T - 3 - L, py + T - 5, L, 2); ctx.fillRect(px + T - 5, py + T - 3 - L, 2, L);
         }
       }
+      this.drawSeals(ctx);
       this.drawTeles(ctx);
-      this.drawGuardZones(ctx);
       // weak-side approach pads: "charge in from here"
       if (this.entries.length) {
         const e = this.entryEmph;
@@ -271,25 +271,18 @@
       A.text(ctx, "!" + dmg, tx + 12, ty + 2, { s: 1, align: "center", color: hero ? C.ink : "#fff6df" });
     }
   };
-  /* guard zones: stepping in costs HP (dashed, stronger while drawing) */
-  BoardView.prototype.drawGuardZones = function (ctx) {
-    if (!this.guards.length) return;
-    const sum = new Map();
-    for (const g of this.guards) { const k = g.y * GW + g.x; sum.set(k, (sum.get(k) || 0) + g.dmg); }
-    const a = 0.35 + 0.5 * this.guardEmph;
-    const march = Math.floor(this.t / 120) % 4;
-    for (const [k, dmg] of sum) {
-      const x = k % GW, y = Math.floor(k / GW), px = x * T + 4, py = y * T + 4, w = T - 8;
-      ctx.globalAlpha = a * 0.25;
-      ctx.fillStyle = "#6a2a5a"; ctx.fillRect(px, py, w, w);
-      ctx.globalAlpha = a;
-      ctx.fillStyle = "#ff6a9a";
-      for (let i = 0; i < w; i += 8) {
-        const o = (i + march * 2) % w;
-        ctx.fillRect(px + o, py, 4, 2); ctx.fillRect(px + w - o - 4, py + w - 2, 4, 2);
-        ctx.fillRect(px, py + w - o - 4, 2, 4); ctx.fillRect(px + w - 2, py + o, 2, 4);
-      }
-      if (this.guardEmph > 0.3) A.text(ctx, "-" + dmg, px + w - 3, py + 3, { s: 1, align: "right", color: "#ffb0c8" });
+  /* ward pillar range: a violet square; enemies inside have no weak side */
+  BoardView.prototype.drawSeals = function (ctx) {
+    const march = Math.floor(this.t / 140) % 4;
+    for (const s of this.seals) {
+      const x0 = Math.max(0, s.x - s.r), y0 = Math.max(0, s.y - s.r), x1 = Math.min(GW - 1, s.x + s.r), y1 = Math.min(GH - 1, s.y + s.r);
+      const px = x0 * T + 2, py = y0 * T + 2, w = (x1 - x0 + 1) * T - 4, h = (y1 - y0 + 1) * T - 4;
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = "#9a6cff"; ctx.fillRect(px, py, w, h);
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = "#c9b3ff";
+      for (let i = 0; i < w; i += 8) { const o = (i + march * 2) % w; ctx.fillRect(px + o, py, 4, 2); ctx.fillRect(px + w - o - 4, py + h - 2, 4, 2); }
+      for (let i = 0; i < h; i += 8) { const o = (i + march * 2) % h; ctx.fillRect(px, py + h - o - 4, 2, 4); ctx.fillRect(px + w - 2, py + o, 2, 4); }
       ctx.globalAlpha = 1;
     }
   };
@@ -1677,10 +1670,11 @@
     { t: "ルートを描く", b: "主人公から指をすべらせて、進む道を描く。斜めにも進める。指を離すと、その道を一気に駆け抜ける。", demo: "route" },
     { t: "敵を切り抜ける", b: "道の途中に敵がいれば、通り抜けざまに斬る。倒しきれなかった敵は進行方向へ2マス押し出される。終点は空きマスで。", demo: "attack" },
     { t: "ウィークサイド", b: "盾に囲まれていない光る側面が弱点。矢印の方向からまっすぐ突っ込むと大ダメージ。", demo: "weak" },
-    { t: "警戒", b: "敵の盾側の上下左右（点線のマス）は警戒エリア。踏み込むと敵1体につき1回ダメージ。斜めのマスは安全（ただし弱点ボーナスもなし）。", demo: "guard" },
-    { t: "押し出しともつれ", b: "押された敵は壁・岩・敵にぶつかると衝突ダメージ。残りの移動が多いほど強くぶつかる。敵にぶつかると同じマスに絡まり「もつれ」になる（移動+1）。もつれは警戒せず、斬れば全員が弱点ダメージ。", demo: "push" },
+    { t: "反撃", b: "盾のある側から上下左右にまっすぐ斬って、倒しきれないと反撃を受ける。斜めから斬れば反撃されない（弱点ボーナスもなし）。", demo: "guard" },
+    { t: "結界柱", b: "結界柱のまわり2マス（紫の枠）にいる敵は弱点が消える。柱を倒すか、敵を枠の外へ押し出せば、ルートの途中でもすぐ弱点が戻る。", demo: "seal" },
+    { t: "押し出しともつれ", b: "押された敵は壁・岩・敵にぶつかると衝突ダメージ。残りの移動が多いほど強くぶつかる。敵にぶつかると同じマスに絡まり「もつれ」になる（移動+1）。もつれた敵は反撃せず、斬れば全員が弱点ダメージ。", demo: "push" },
     { t: "岩と壁", b: "岩はマスごと塞ぐが、岩と岩の斜めのすき間は通れる。石の壁はマスの辺だけを塞ぐ。壁ごしには進めず、押された敵も壁で止まる。", demo: "wall" },
-    { t: "攻撃予告", b: "赤いマスは次の敵ターンに攻撃が来る場所。そこで終わると被弾。敵を押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
+    { t: "攻撃予告", b: "骨砕きとボスは、次の敵ターンに攻撃するマスを赤く予告する。そこで終わると被弾。押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
     { t: "撃破で移動回復", b: "敵を倒すと移動力が回復する（1ルートで最初の撃破は+2、2体目からは+1）。倒して、進んで、また倒す。長い連鎖が勝利への近道。", demo: "chain" },
     { t: "燠火の足跡", b: "歩いたマスは燃えて、しばらく入れない。斜めに交差するのはOK。敵がいたマスは燃えないので、もう一度踏み込める。仲間が増えるほど足跡は長く残る。", demo: "ember" },
     { t: "夜の圧", b: "ターン終了時、生き残った敵の数だけダメージを受ける。紫の炎の数がその敵の圧。のんびりしていると押し潰される。", demo: "pressure" },
@@ -1729,7 +1723,7 @@
         if (dead) { A.text(ctx, i === 0 ? "+2" : "+1", c.x, c.y - 10, { s: 2, align: "center", color: C.heal }); }
       });
       const head = path.length ? cell(...path[Math.max(0, n - 1)]) : cell(2, 5);
-      if (!["guard", "push", "tele"].includes(kind)) A.spr(ctx, "kai", head.x, head.y + 16, { s: 2 });
+      if (!["guard", "push", "tele", "seal"].includes(kind)) A.spr(ctx, "kai", head.x, head.y + 16, { s: 2 });
       if (kind === "comp" && n >= 5) { A.spr(ctx, "pip", head.x - 40, head.y + 16, { s: 2 }); ctx.fillStyle = C.emberL; A.pline(ctx, head.x, head.y, cell(4, 1).x, cell(4, 1).y, 4); }
       if (kind === "pressure") { const c = cell(2, 5); A.spr(ctx, "kai", c.x, c.y + 16, { s: 2 }); A.text(ctx, "-6", c.x, c.y - 30, { s: 3, align: "center", color: "#ff8f9b" }); }
       const fl = Math.floor(t / 200) % 2;
@@ -1767,6 +1761,20 @@
         const e = hit ? cell(4, 2) : cell(3, 2);
         if (!hit) A.spr(ctx, "husk", e.x, e.y + 16, { s: 2 });
         else { A.spr(ctx, "husk", e.x, e.y + 16, { s: 2 }); A.text(ctx, "-2", e.x, e.y - 30, { s: 2, align: "center", color: "#ffd35a" }); }
+      }
+      if (kind === "seal") {
+        const tt = cell(1, 2), ex = cell(3, 3), k = (t % 3200) / 3200, pushed = k > 0.5;
+        const march = Math.floor(t / 140) % 4;
+        ctx.fillStyle = "#c9b3ff";
+        const px = ox, py = oy, w = S * 4 - 2, h = S * 5 - 2;
+        for (let i = 0; i < w; i += 8) { const o = (i + march * 2) % w; ctx.fillRect(px + o, py, 4, 2); ctx.fillRect(px + w - o - 4, py + h - 2, 4, 2); }
+        for (let i = 0; i < h; i += 8) { const o = (i + march * 2) % h; ctx.fillRect(px, py + h - o - 4, 2, 4); ctx.fillRect(px + w - 2, py + o, 2, 4); }
+        A.spr(ctx, "totem", tt.x, tt.y + 16, { s: 2 });
+        const e = pushed ? cell(5, 3) : ex;
+        A.spr(ctx, "shield", e.x, e.y + 16, { s: 2 });
+        if (pushed) { ctx.fillStyle = C.weak; ctx.fillRect(e.x - 18, e.y - 14, 4, 28); A.jp(ctx, "弱点復活", e.x - 10, e.y - 46, { size: 16, align: "center", color: C.emberL }); }
+        else A.spr(ctx, "i_chain", e.x + 12, e.y + 14, { s: 2 });
+        const hh = pushed ? cell(4, 3) : cell(2, 3); A.spr(ctx, "kai", hh.x, hh.y + 16, { s: 2 });
       }
       if (kind === "tele") {
         const e = cell(3, 1);

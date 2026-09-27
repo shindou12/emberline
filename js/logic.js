@@ -290,7 +290,9 @@
     const side = CW.find((w) => CARD[w][0] === -dx && CARD[w][1] === -dy);
     return e.weak === side;
   }
-  const sealedBy = (enemies, e) => !e.boss && e.type !== "totem" && enemies.some((t) => t.alive && t.type === "totem");
+  /* a ward pillar seals every enemy within sealRange (Chebyshev) of it: no weak side */
+  const sealedBy = (enemies, e) => !e.boss && e.type !== "totem" &&
+    enemies.some((t) => t.alive && t.type === "totem" && Math.max(Math.abs(t.x - e.x), Math.abs(t.y - e.y)) <= BAL.sealRange);
   const dirEq = (a, b) => a[0] === b[0] && a[1] === b[1];
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
   const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
@@ -303,31 +305,6 @@
       if (((yi > py) !== (yj > py)) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
     }
     return inside;
-  }
-
-  /* Guard zone (replaces counterattacks): the tiles orthogonally next to an
-     enemy's shielded sides. Stepping in costs HP once per enemy per route. */
-  function inGuard(enemies, e, t, B) {
-    if (!e.alive || e.tangled || e.atk <= 0) return false;
-    if (covers(e, t.x, t.y)) return false;
-    const nx = Math.max(e.x, Math.min(e.x + e.size - 1, t.x)), ny = Math.max(e.y, Math.min(e.y + e.size - 1, t.y));
-    const dx = t.x - nx, dy = t.y - ny;
-    if (Math.abs(dx) + Math.abs(dy) !== 1) return false; // orthogonal sides only: diagonals are a safe, plain approach
-    if (B && wallBetween(B, { x: nx, y: ny }, t)) return false; // a wall shields you from its gaze
-    if (sealedBy(enemies, e)) return true;
-    const w = CARD[e.weak];
-    return dx * w[0] + dy * w[1] <= 0;
-  }
-  function guardTiles(B, enemies) {
-    const out = [];
-    for (const e of enemies) {
-      if (!e.alive || e.tangled || e.atk <= 0) continue;
-      for (let y = e.y - 1; y <= e.y + e.size; y++) for (let x = e.x - 1; x <= e.x + e.size; x++) {
-        if (isRock(B, x, y) || !inGuard(enemies, e, { x, y }, B)) continue;
-        out.push({ x, y, uid: e.uid, dmg: e.atk });
-      }
-    }
-    return out;
   }
 
   /* ---------- telegraphs (Into the Breach style) ----------
@@ -389,7 +366,7 @@
       default: return { n: Math.max(1, c.n - r) };
     }
   }
-  const markOf = (T, comp) => T.marks[comp] || { dirs: 0, weak: 0, route: 0, tangle: 0, guard: 0 };
+  const markOf = (T, comp) => T.marks[comp] || { dirs: 0, weak: 0, route: 0, tangle: 0, kills: 0 };
 
   /* progress for the HUD */
   function condProgress(run, comp, T) {
@@ -429,7 +406,7 @@
         break;
       }
       case "tangle": need = q.n; cur = T.tangles - mk.tangle; break;
-      case "guard": need = q.n; cur = T.guardEntered - mk.guard; break;
+      case "kills": need = q.n; cur = T.kills - mk.kills; break;
       case "weak": need = q.n; cur = T.weakHits - mk.weak; break;
       case "loop": need = q.n; cur = Math.min(q.n - 1, T.route.length - 1 - mk.route); break;
     }
@@ -447,7 +424,7 @@
     const S0 = stats(run);
     const T = {
       moves: S0.mov, hp: run.hp, chain: 0, kills: 0, weakHits: 0, dmgTaken: 0, attacks: 0,
-      guardBlock: (run.heroId === "gorm" ? 1 : 0) + (has(run, "shade") ? 1 : 0), guarded: new Set(), guardEntered: 0, guardHits: 0,
+      guardBlock: (run.heroId === "gorm" ? 1 : 0) + (has(run, "shade") ? 1 : 0), guardHits: 0,
       forcedWeak: 0, uses: {}, marks: {}, dirs: [], straight: 0, route: [route[0]],
       compassUsed: false, plumeUsed: run.plumeUsed, bumps: 0, tangles: 0, multi: 0,
       cold: new Set(), coldAt: [false],
@@ -491,9 +468,18 @@
       }
     }
 
-    /* shove a survivor along the line of travel; walls, embers and bodies stop it */
+    function counter(e, rec) {
+      if (T.guardBlock > 0) { T.guardBlock--; push({ type: "guardBlocked", uid: e.uid, reason: "guard" }); rec.guards.push({ uid: e.uid, blocked: true }); return; }
+      const dmg = Math.max(0, e.atk - (has(run, "gauntlet") ? 1 : 0));
+      if (!dmg) return;
+      T.guardHits++;
+      rec.guards.push({ uid: e.uid, dmg });
+      heroHurt(dmg, e);
+    }
+    /* shove a survivor along the line of travel; walls, embers and bodies stop it.
+       Returns true when it actually slid. */
     function shove(e, d, rec) {
-      if (e.boss || e.size > 1) return;
+      if (e.boss || e.size > 1) return false;
       const n = pushDist(run);
       const ember = blockedSet(B, T.route, T.cold);
       const from = { x: e.x, y: e.y }, path = [];
@@ -517,7 +503,7 @@
       const bump = (BAL.bump + Math.floor(T.moves * BAL.bumpPerMove)) * (has(run, "impact") ? 2 : 1);
       push({ type: "push", uid: e.uid, from, path, stop, dir: d, bump: stop ? bump : 0 });
       rec.pushes.push({ uid: e.uid, from, path, stop, dir: d, bump: stop ? bump : 0 });
-      if (!stop) return;
+      if (!stop) return path.length > 0;
       T.bumps++;
       if (stop === "tangle") {
         T.tangles++;
@@ -533,6 +519,7 @@
         const o = stop === "boss" ? other.find((x) => x.boss) : other[0];
         if (!done && o && o.alive) damage(o, bump, "bump", rec, { reason: stop });
       }
+      return path.length > 0;
     }
 
     function trySkills(i, rec) {
@@ -563,7 +550,7 @@
             break;
           }
           case "tangle": ok = T.tangles - mk.tangle >= q.n; break;
-          case "guard": ok = T.guardEntered - mk.guard >= q.n; break;
+          case "kills": ok = T.kills - mk.kills >= q.n; break;
           case "weak": ok = T.weakHits - mk.weak >= q.n; break;
           case "loop":
             for (let j = i - q.n; j >= mk.route; j--) if (cheb(T.route[j], T.route[i]) === 1) { ok = true; data.poly = T.route.slice(j, i + 1); break; }
@@ -571,7 +558,7 @@
         }
         if (!ok) continue;
         T.uses[comp] = (T.uses[comp] || 0) + 1;
-        T.marks[comp] = { dirs: T.dirs.length, weak: T.weakHits, route: i, tangle: T.tangles, guard: T.guardEntered };
+        T.marks[comp] = { dirs: T.dirs.length, weak: T.weakHits, route: i, tangle: T.tangles, kills: T.kills };
         runSkill(comp, info, i, data, rec);
       }
     }
@@ -639,22 +626,7 @@
       const rec = { i, tile: b, attack: null, attacks: [], skills: [], kills: [], pushes: [], guards: [], moves: 0, hp: 0, relic: null };
       steps.push(rec);
 
-      // 1. stepping into guard zones
-      for (const e of alive()) {
-        if (T.guarded.has(e.uid) || !inGuard(st.enemies, e, b, B)) continue;
-        T.guarded.add(e.uid); T.guardEntered++;
-        if (has(run, "aegis") && diag) { push({ type: "guardBlocked", uid: e.uid, reason: "aegis" }); rec.guards.push({ uid: e.uid, blocked: true }); continue; }
-        if (T.guardBlock > 0) { T.guardBlock--; push({ type: "guardBlocked", uid: e.uid, reason: "guard" }); rec.guards.push({ uid: e.uid, blocked: true }); continue; }
-        const dmg = Math.max(0, e.atk - (has(run, "gauntlet") ? 1 : 0));
-        if (!dmg) continue;
-        T.guardHits++;
-        rec.guards.push({ uid: e.uid, dmg });
-        heroHurt(dmg, e);
-        if (done) break;
-      }
-      if (done) break;
-
-      // 2. passing through enemies
+      // passing through enemies
       const hereE = enemiesAt(st.enemies, b.x, b.y).filter((e) => !covers(e, a.x, a.y));
       if (hereE.length) {
         const S = stats(run, T.hp);
@@ -687,7 +659,10 @@
           if (e.boss && st.phase2 && !weak) dmg = Math.ceil(dmg / 2);
           rec.attacks.push({ uid: e.uid, dmg, weak, forced, sealed, kill: e.hp - dmg <= 0, bonus });
           damage(e, dmg, "hero", rec, { weak, forced, sealed, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
-          if (!done && e.alive) shove(e, d, rec);
+          const moved = !done && e.alive ? shove(e, d, rec) : false;
+          // counterattack: a straight (non-diagonal) hit on a shielded side that leaves it standing
+          if (!done && e.alive && !weak && !diag && e.atk > 0 && !e.tangled && !(moved && has(run, "aegis"))) counter(e, rec);
+          if (done) break;
         }
         rec.attack = rec.attacks[0] || null;
       }
@@ -1043,7 +1018,6 @@
   function enemyPressure(run, B, e) {
     let p = e.pressure - (has(run, "coal") ? 1 : 0);
     if (e.boss && B.phase2) p += 1;
-    if (B.turn >= BAL.deepTurn) p += 1;
     return Math.max(0, p);
   }
   function pressureOf(run, B, enemies) {
@@ -1057,7 +1031,7 @@
     blockedSet, stepError, wallBetween, passable, isWeakEntry, sealedBy, enemyAt, enemiesAt, covers, isRock, idx, inB,
     simulate, commitRoute, enemyPhase, genRewards, applyReward, heal, reachable, weakEntries,
     condReq, condProgress, pressureOf, enemyPressure, has, coolCount, canMove, unstick,
-    inGuard, guardTiles, teleTiles, teleDmgAt, planTelegraphs, pushDist,
+    teleTiles, teleDmgAt, planTelegraphs, pushDist,
     objectiveState, claimObjectives,
   };
 })(window.EL);

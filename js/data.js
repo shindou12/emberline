@@ -11,7 +11,7 @@
     tangleRefund: 1,
     refundDecay: 1, // kills after the first in a route refund this much less // moves regained for creating a tangle
     coolMin: 2, // embers always cool at least this many tiles per turn
-    deepTurn: 4, // from this turn on, the night deepens: every enemy presses +1
+    sealRange: 2, // ward pillar: enemies within this many tiles lose their weak side
     healAfterBattle: 4,
     restHealPct: 0.35,
     maxCompanions: 3,
@@ -33,7 +33,7 @@
     },
     gorm: {
       name: "ゴルム", title: "灰の重騎士", sprite: "gorm", hp: 42, atk: 4, mov: 5, refund: 2,
-      trait: "鉄壁", traitText: "各ターン最初の警戒を無効化する。押し出しが1マス伸びる。",
+      trait: "鉄壁", traitText: "各ターン最初の反撃を無効化する。押し出しが1マス伸びる。",
       style: "重装型。少ない歩数で確実に砕け。", color: "#b8862e",
       stats: { hp: 4, atk: 4, mov: 2 },
     },
@@ -64,8 +64,8 @@
     },
     bram: {
       name: "ブラム", title: "盾の老兵", sprite: "bram", color: "#fff6df",
-      cond: { type: "guard", n: 2 }, condText: "警戒2", condLong: "警戒範囲に2回踏み込む",
-      skill: "不屈", skillText: "HP5回復＋次の警戒を1回無効", effect: "guard", power: 5,
+      cond: { type: "kills", n: 2 }, condText: "撃破2", condLong: "1ルートで2体倒す",
+      skill: "不屈", skillText: "HP5回復＋次の反撃を1回無効", effect: "guard", power: 5,
     },
     sable: {
       name: "セーブル", title: "影猫", sprite: "sable", color: "#b08cff",
@@ -80,13 +80,13 @@
   };
 
   const ENEMIES = {
-    husk: { name: "殻喰い", sprite: "husk", hp: 7, atk: 1, pressure: 1, ai: "chase", tele: "adjacent", teleDmg: 3, desc: "近づいてきて噛みつく。背中を向けて歩く。" },
-    wisp: { name: "鬼火", sprite: "wisp", hp: 4, atk: 0, pressure: 1, rotates: true, ai: "static", tele: "line", teleDmg: 2, desc: "動かず、直線上に火を吐く。弱点が毎ターン回る。" },
-    shield: { name: "盾持ち", sprite: "shield", hp: 10, atk: 2, pressure: 1, ai: "static", desc: "その場で広く警戒する。背後を狙え。" },
-    caller: { name: "呼び声", sprite: "caller", hp: 6, atk: 1, pressure: 1, summons: true, ai: "flee", desc: "逃げ回りながら殻喰いを呼ぶ。" },
-    totem: { name: "結界柱", sprite: "totem", hp: 8, atk: 0, pressure: 1, seals: true, ai: "static", desc: "立っている間、他の敵は全方位を警戒する。" },
-    brute: { name: "骨砕き", sprite: "brute", hp: 13, atk: 3, pressure: 2, ai: "slow", tele: "cross", teleDmg: 5, desc: "2ターンに1歩。十字に大槌を振り下ろす。" },
-    boss: { name: "灰冠の王ヴォルグ", sprite: "boss", hp: 54, atk: 2, pressure: 3, size: 2, boss: true, ai: "static", tele: "boss", teleDmg: 4, desc: "深層の主。弱点は毎ターン巡り、灰の波で列を薙ぐ。押し出せない。" },
+    husk: { name: "殻喰い", sprite: "husk", hp: 9, atk: 1, pressure: 1, ai: "chase", desc: "近づいてくる。背中（弱点）を向けて歩く。" },
+    wisp: { name: "鬼火", sprite: "wisp", hp: 5, atk: 0, pressure: 2, rotates: true, ai: "static", desc: "脆いが夜の圧が強い。弱点が毎ターン回る。" },
+    shield: { name: "盾持ち", sprite: "shield", hp: 13, atk: 2, pressure: 1, ai: "static", desc: "硬く、反撃が痛い。背後を狙え。" },
+    caller: { name: "呼び声", sprite: "caller", hp: 8, atk: 1, pressure: 1, summons: true, ai: "flee", desc: "逃げ回りながら殻喰いを呼ぶ。" },
+    totem: { name: "結界柱", sprite: "totem", hp: 10, atk: 0, pressure: 1, seals: true, ai: "static", desc: "周囲2マスの敵の弱点を封じる。倒すか、範囲の外へ押し出せば弱点が戻る。" },
+    brute: { name: "骨砕き", sprite: "brute", hp: 17, atk: 3, pressure: 2, ai: "slow", tele: "cross", teleDmg: 5, desc: "2ターンに1歩。十字に大槌を振り下ろす。" },
+    boss: { name: "灰冠の王ヴォルグ", sprite: "boss", hp: 60, atk: 2, pressure: 4, size: 2, boss: true, ai: "static", tele: "boss", teleDmg: 4, desc: "深層の主。弱点は毎ターン巡り、灰の波で列を薙ぐ。押し出せない。" },
   };
 
   /* Relics change *how* you draw routes, not just numbers. */
@@ -94,7 +94,7 @@
     boots: { name: "燠の長靴", rarity: 1, icon: "r_boots", desc: "最大移動+1。" },
     fang: { name: "狩人の牙", rarity: 1, icon: "r_fang", desc: "撃破時の移動回復+1。" },
     dirk: { name: "背刺しの短剣", rarity: 2, icon: "r_dirk", desc: "ウィークサイド攻撃のダメージ倍率+1。" },
-    gauntlet: { name: "鉄の手甲", rarity: 1, icon: "r_gauntlet", desc: "警戒で受けるダメージ−1。" },
+    gauntlet: { name: "鉄の手甲", rarity: 1, icon: "r_gauntlet", desc: "反撃で受けるダメージ−1。" },
     hourglass: { name: "灰の砂時計", rarity: 1, icon: "r_hourglass", desc: "足跡の長さ−3。盤面が広く使える。" },
     banner: { name: "群れの旗", rarity: 2, icon: "r_banner", desc: "仲間1人につき攻撃+1。" },
     heart: { name: "狂戦士の心臓", rarity: 1, icon: "r_heart", desc: "HPが半分以下の間、攻撃+2。" },
@@ -103,7 +103,7 @@
     charm: { name: "曲がり角の護符", rarity: 2, icon: "r_charm", desc: "仲間の発動条件が1段階ゆるくなる。" },
     twin: { name: "二度咲きの灯", rarity: 2, icon: "r_twin", desc: "仲間の能力が1ターンに2回まで発動する。" },
     coal: { name: "冷えた炭", rarity: 2, icon: "r_coal", desc: "ターン終了時、敵1体ごとの圧−1。" },
-    aegis: { name: "灯火の盾", rarity: 1, icon: "r_aegis", desc: "斜めに踏み込んだときは警戒されない。" },
+    aegis: { name: "灯火の盾", rarity: 1, icon: "r_aegis", desc: "押し出せた敵からは反撃されない。" },
     compass: { name: "渦の羅針", rarity: 1, icon: "r_compass", desc: "輪を描いて閉じると移動+2（1ターン1回）。" },
     scorch: { name: "燃え跡", rarity: 2, icon: "r_scorch", desc: "ターン終了時、足跡に隣接する敵に2ダメージ。" },
     oath: { name: "初撃の誓い", rarity: 1, icon: "r_oath", desc: "各ターン最初の攻撃は必ずウィークサイド。" },
@@ -114,7 +114,7 @@
     brawn: { name: "剛腕", rarity: 1, icon: "r_gauntlet", desc: "押し出しが1マス伸びる。" },
     impact: { name: "衝撃の鋲", rarity: 1, icon: "r_sigil", desc: "衝突ダメージが2倍になる。" },
     rope: { name: "絡め縄", rarity: 2, icon: "r_chain", desc: "もつれを作ると移動+2（通常+1）。もつれは4体まで重なる。" },
-    shade: { name: "影歩き", rarity: 1, icon: "r_plume", desc: "各ターン最初の警戒を無視する。" },
+    shade: { name: "影歩き", rarity: 1, icon: "r_plume", desc: "各ターン最初の反撃を無効化する。" },
     emberhand: { name: "燠の手", rarity: 1, icon: "r_scorch", desc: "燃える足跡に押し込んだ敵に+2ダメージ。" },
   };
 
@@ -168,7 +168,7 @@
     multi: { label: "まとめ撃破", desc: "もつれた敵を2体同時に倒す" },
     weak3: { label: "背撃3", desc: "ウィークサイドから3回攻撃する" },
     bump3: { label: "衝突3", desc: "押し出しで3回ぶつける" },
-    noguard: { label: "警戒ゼロ", desc: "一度も警戒されずに勝つ" },
+    noguard: { label: "反撃ゼロ", desc: "一度も反撃を受けずに勝つ" },
     fast2: { label: "2ターン", desc: "2ターン以内に全滅させる" },
     friendly: { label: "同士討ち", desc: "敵の攻撃予告で敵を倒させる" },
   };
