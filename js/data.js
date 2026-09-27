@@ -8,7 +8,8 @@
     pushDist: 2, // survivors are shoved this many tiles along your line
     tangleMax: 3, // enemies that can pile into one tile
     bump: 1, bumpPerMove: 1 / 3, // collision damage = bump + floor(moves left × bumpPerMove)
-    tangleRefund: 1, // moves regained for creating a tangle
+    tangleRefund: 1,
+    refundDecay: 1, // kills after the first in a route refund this much less // moves regained for creating a tangle
     coolMin: 2, // embers always cool at least this many tiles per turn
     deepTurn: 4, // from this turn on, the night deepens: every enemy presses +1
     healAfterBattle: 4,
@@ -19,19 +20,19 @@
 
   const HEROES = {
     kai: {
-      name: "カイ", title: "燠の剣士", sprite: "kai", hp: 36, atk: 3, mov: 7, refund: 2,
+      name: "カイ", title: "燠の剣士", sprite: "kai", hp: 36, atk: 3, mov: 6, refund: 2,
       trait: "背撃の達人", traitText: "ウィークサイド攻撃の倍率が×2.5になる。",
       style: "バランス型。背後を取って切り抜けろ。", color: "#e8453c",
       stats: { hp: 3, atk: 3, mov: 3 },
     },
     rue: {
-      name: "ルゥ", title: "風の槍兵", sprite: "rue", hp: 30, atk: 3, mov: 8, refund: 2,
+      name: "ルゥ", title: "風の槍兵", sprite: "rue", hp: 30, atk: 3, mov: 7, refund: 2,
       trait: "突進", traitText: "攻撃の直前にまっすぐ進んだマス数だけ攻撃+1（最大+3）。",
       style: "連鎖型。長い直線で突き抜け、倒して走り続けろ。", color: "#3fd6c0",
       stats: { hp: 2, atk: 3, mov: 4 },
     },
     gorm: {
-      name: "ゴルム", title: "灰の重騎士", sprite: "gorm", hp: 42, atk: 4, mov: 6, refund: 2,
+      name: "ゴルム", title: "灰の重騎士", sprite: "gorm", hp: 42, atk: 4, mov: 5, refund: 2,
       trait: "鉄壁", traitText: "各ターン最初の警戒を無効化する。押し出しが1マス伸びる。",
       style: "重装型。少ない歩数で確実に砕け。", color: "#b8862e",
       stats: { hp: 4, atk: 4, mov: 2 },

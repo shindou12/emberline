@@ -465,7 +465,8 @@
     function kill(e, src, rec) {
       e.alive = false;
       T.kills++; T.chain++;
-      let refund = stats(run, T.hp).refund;
+      // the first kill of a route refunds in full, later kills one less
+      let refund = stats(run, T.hp).refund - (T.kills > 1 ? BAL.refundDecay : 0);
       let bonusHeal = 0;
       if (has(run, "chain") && T.chain >= 3) { refund += 1; bonusHeal = 1; }
       T.moves += refund;

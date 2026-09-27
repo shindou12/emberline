@@ -1681,7 +1681,7 @@
     { t: "押し出しともつれ", b: "押された敵は壁・岩・敵にぶつかると衝突ダメージ。残りの移動が多いほど強くぶつかる。敵にぶつかると同じマスに絡まり「もつれ」になる（移動+1）。もつれは警戒せず、斬れば全員が弱点ダメージ。", demo: "push" },
     { t: "岩と壁", b: "岩はマスごと塞ぐが、岩と岩の斜めのすき間は通れる。石の壁はマスの辺だけを塞ぐ。壁ごしには進めず、押された敵も壁で止まる。", demo: "wall" },
     { t: "攻撃予告", b: "赤いマスは次の敵ターンに攻撃が来る場所。そこで終わると被弾。敵を押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
-    { t: "撃破で移動回復", b: "敵を倒すたびに移動力が回復する。倒して、進んで、また倒す。長い連鎖が勝利への近道。", demo: "chain" },
+    { t: "撃破で移動回復", b: "敵を倒すと移動力が回復する（1ルートで最初の撃破は+2、2体目からは+1）。倒して、進んで、また倒す。長い連鎖が勝利への近道。", demo: "chain" },
     { t: "燠火の足跡", b: "歩いたマスは燃えて、しばらく入れない。斜めに交差するのはOK。敵がいたマスは燃えないので、もう一度踏み込める。仲間が増えるほど足跡は長く残る。", demo: "ember" },
     { t: "夜の圧", b: "ターン終了時、生き残った敵の数だけダメージを受ける。紫の炎の数がその敵の圧。のんびりしていると押し潰される。", demo: "pressure" },
     { t: "戦闘目標", b: "右上の2つの札は、この戦闘の目標と報酬。達成して勝つと、その報酬がもらえる。欲しいものがあれば狙ってみよう。", demo: "route" },
@@ -1726,7 +1726,7 @@
         if (!dead) A.spr(ctx, i % 2 ? "wisp" : "husk", c.x, c.y + 16, { s: 2 });
         if (kind === "weak") { ctx.fillStyle = C.weak; ctx.fillRect(c.x - 14, c.y + 16, 28, 4); ctx.fillStyle = "#7c86a3"; ctx.fillRect(c.x - 14, c.y - 18, 28, 4); ctx.fillRect(c.x - 18, c.y - 14, 4, 28); ctx.fillRect(c.x + 14, c.y - 14, 4, 28); }
         if (kind === "pressure") { ctx.fillStyle = "#b08cff"; for (let k = 0; k <= i; k++) ctx.fillRect(c.x - 16 + k * 6, c.y - 18, 4, 6); }
-        if (dead) { A.text(ctx, "+2", c.x, c.y - 10, { s: 2, align: "center", color: C.heal }); }
+        if (dead) { A.text(ctx, i === 0 ? "+2" : "+1", c.x, c.y - 10, { s: 2, align: "center", color: C.heal }); }
       });
       const head = path.length ? cell(...path[Math.max(0, n - 1)]) : cell(2, 5);
       if (!["guard", "push", "tele"].includes(kind)) A.spr(ctx, "kai", head.x, head.y + 16, { s: 2 });

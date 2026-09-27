@@ -327,12 +327,14 @@
       this.clearTargets();
       const alivePred = {};
       for (const e of res.st.enemies) alivePred[e.uid] = e;
+      const refundOf = {};
+      for (const e of res.events) if (e.type === "kill") refundOf[e.uid] = e.refund;
       let kills = 0, attacks = 0, skills = 0;
       for (const e of B.enemies) {
         const ev = this.enemyViews[e.uid], p = alivePred[e.uid];
         if (!ev || !p) continue;
         const dmg = e.hp - Math.max(0, p.hp);
-        if (dmg > 0 || !p.alive) { ev.target = true; ev.dmg = dmg; ev.kill = !p.alive; ev.refund = !p.alive ? L.stats(run).refund : 0; }
+        if (dmg > 0 || !p.alive) { ev.target = true; ev.dmg = dmg; ev.kill = !p.alive; ev.refund = !p.alive ? refundOf[e.uid] || 0 : 0; }
         if (!p.alive) kills++;
       }
       rt.skillMarks = []; rt.areas = []; rt.pushes = []; rt.guardHits = [];
@@ -403,7 +405,7 @@
       else if (res.T.tangles > 0 && !kills) this.hint("もつれた！ 斬れば全員に弱点ダメージ");
       else if (guardDmg > 0 && res.steps.length <= 3) this.hint(`警戒エリア −${guardDmg} — 弱点側から回り込め`);
       else if (skills) this.hint("仲間の能力が発動する！");
-      else if (kills) this.hint(`撃破で移動+${L.stats(run).refund} — まだ伸ばせる`);
+      else if (kills) this.hint(kills === 1 ? `撃破で移動+${L.stats(run).refund} — まだ伸ばせる` : "2体目以降の撃破は移動+1 — 目標を見極めて");
       else if (this.route.length > 1) this.hint("指を離して、出撃ボタンで実行");
       else this.hint("光る側面からまっすぐ突っ込め");
     }
