@@ -52,7 +52,7 @@
     if (has(run, "heart") && hp <= run.maxHp / 2) atk += 2;
     const mov = h.mov + run.bonusMov + (has(run, "boots") ? 1 : 0);
     const refund = h.refund + (has(run, "fang") ? 1 : 0);
-    let weakMult = run.heroId === "kai" ? 2.5 : 2;
+    let weakMult = 2;
     if (has(run, "dirk")) weakMult += 1;
     const trail = Math.max(2, BAL.trailBase + BAL.trailPer * run.companions.length - (has(run, "hourglass") ? 3 : 0) + (has(run, "lantern") ? 4 : 0));
     return { atk, mov, refund, weakMult, trail };
@@ -978,6 +978,8 @@
       if (r.id === "pact") { run.maxHp = Math.max(10, run.maxHp - 8); run.hp = Math.min(run.hp, run.maxHp); }
     }
   }
+  /* after-battle recovery is Kai's trait */
+  function battleHeal(run) { return run.heroId === "kai" ? heal(run, BAL.healAfterBattle) : 0; }
   function heal(run, n) { const b = run.hp; run.hp = Math.min(run.maxHp, run.hp + n); return run.hp - b; }
 
   /* for UI: tiles reachable from `from` with `moves` steps (ignores refunds) */
@@ -1037,7 +1039,7 @@
   EL.Logic = {
     CARD, CW, DIRS8, rngFrom, createRun, stats, genMap, nextNodes, genBattle, startCandidates,
     blockedSet, stepError, isWeakEntry, sealedBy, enemyAt, enemiesAt, covers, isRock, idx, inB,
-    simulate, commitRoute, enemyPhase, genRewards, applyReward, heal, reachable, weakEntries,
+    simulate, commitRoute, enemyPhase, genRewards, applyReward, heal, battleHeal, reachable, weakEntries,
     condReq, condProgress, pressureOf, enemyPressure, has, coolCount, canMove, unstick,
     teleTiles, teleDmgAt, planTelegraphs, pushDist,
     objectiveState, claimObjectives,

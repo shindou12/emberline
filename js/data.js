@@ -11,7 +11,7 @@
     refundDecay: 1, // kills after the first in a route refund this much less // moves regained for creating a tangle
     coolMin: 2, // embers always cool at least this many tiles per turn
     sealRange: 2, // ward pillar: enemies within this many tiles lose their weak side
-    healAfterBattle: 4,
+    healAfterBattle: 4, // Kai's trait only: other heroes do not heal after a battle
     restHealPct: 0.35,
     maxCompanions: 3,
     maxRows: 7, // rows before the boss
@@ -20,7 +20,7 @@
   const HEROES = {
     kai: {
       name: "カイ", title: "燠の剣士", sprite: "kai", hp: 36, atk: 3, mov: 6, refund: 2,
-      trait: "背撃の達人", traitText: "ウィークサイド攻撃の倍率が×2.5になる。",
+      trait: "燠の手当て", traitText: "戦闘に勝つたび、HPが4回復する。",
       style: "バランス型。背後を取って切り抜けろ。", color: "#e8453c",
       stats: { hp: 3, atk: 3, mov: 3 },
     },
@@ -85,7 +85,7 @@
     caller: { name: "呼び声", sprite: "caller", hp: 8, atk: 1, pressure: 1, summons: true, ai: "flee", desc: "逃げ回りながら殻喰いを呼ぶ。" },
     totem: { name: "結界柱", sprite: "totem", hp: 10, atk: 0, pressure: 1, seals: true, ai: "static", desc: "周囲2マスの敵の弱点を封じる。倒すか、範囲の外へ押し出せば弱点が戻る。" },
     brute: { name: "骨砕き", sprite: "brute", hp: 17, atk: 3, pressure: 2, ai: "slow", tele: "cross", teleDmg: 5, desc: "2ターンに1歩。十字に大槌を振り下ろす。" },
-    boss: { name: "灰冠の王ヴォルグ", sprite: "boss", hp: 66, atk: 2, pressure: 4, size: 2, boss: true, ai: "static", tele: "boss", teleDmg: 4, desc: "深層の主。弱点は毎ターン巡り、灰の波で列を薙ぐ。押し出せない。" },
+    boss: { name: "灰冠の王ヴォルグ", sprite: "boss", hp: 60, atk: 2, pressure: 4, size: 2, boss: true, ai: "static", tele: "boss", teleDmg: 4, desc: "深層の主。弱点は毎ターン巡り、灰の波で列を薙ぐ。押し出せない。" },
   };
 
   /* Relics change *how* you draw routes, not just numbers. */

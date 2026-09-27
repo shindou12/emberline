@@ -1332,7 +1332,7 @@
             if (o.reward.kind === "relic") { v.relicHUD.fresh = o.reward.id; setTimeout(() => (v.relicHUD.fresh = null), 1500); }
             await this.banner("BONUS", `${D.OBJECTIVES[o.id].label} 達成 — ${this.rewardName(o.reward)}`, C.emberL, 900);
           }
-          const healed = L.heal(run, D.BAL.healAfterBattle);
+          const healed = L.battleHeal(run);
           if (healed) { v.floats.spawn("+" + healed, v.hero.x, v.hero.y - 50, { s: 3, color: C.heal }); v.playerHUD.hp = run.hp; S.play("heal"); await EL.wait(500); }
         }
         this.busy = false;

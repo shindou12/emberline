@@ -102,7 +102,7 @@ function playRun(heroId, seed) {
       log.hp.push(run.hp);
       if (!r.win) { log.died = n.type === "boss" ? "boss" : "row" + n.row; return { win: false, log, run }; }
       if (n.type === "boss") return { win: true, log, run };
-      L.heal(run, D.BAL.healAfterBattle);
+      L.battleHeal(run);
       const rw = L.genRewards(run, n.type === "elite" ? "elite" : "battle");
       const pick = rw.find((r) => r.kind === "comp") || rw[0];
       if (pick) L.applyReward(run, pick);
