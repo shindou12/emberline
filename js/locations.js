@@ -11,6 +11,20 @@
   A.defSprite("o_mossrock", recolor(ROCK, { "4": "g", "3": "G", "2": "E" }).map((r, i) => (i === 3 || i === 4 ? r.replace(/[Ge]/g, "g") : r)));
   A.defSprite("o_rubble", recolor(ROCK, { "4": "m", "3": "M", "2": "e", "1": "E" }));
   A.defSprite("o_boulder", recolor(ROCK, { "4": "s", "3": "S", "2": "w", "1": "W" }));
+  A.defSprite("o_greyrock", recolor(ROCK, { "4": "5", "3": "4", "2": "M", "1": "3" }));
+  A.defSprite("o_snowrock", recolor(ROCK, { "4": "6", "3": "5", "2": "M", "1": "3" }).map((r, i) => (i >= 3 && i <= 6 ? r.replace(/[45M]/g, "6") : r)));
+  A.defSprite("o_pine", [
+    "................", ".......00.......", "......0660......", ".....06GG60.....",
+    "....0GGGGGG0....", ".....0G66G0.....", "....0GGGGGGG0...", "...0GGG66GGGG0..",
+    "....0GGGGGGG0...", "...0GG6GGGG6G0..", "..0GGGGGGGGGGG0.", "..00000WW00000..",
+    "......0WW0......", "......0WW0......", ".....000000.....", "................",
+  ]);
+  A.defSprite("o_drift", [
+    "................", "................", "................", "................",
+    "................", "................", "..........00....", ".........0w0....",
+    "..00000000ww0...", ".0wwwwwwwwwW0...", "0wWwwwwWwwwwW0..", "0WWWWWWWWWWWW0..",
+    ".0000000000000..", "................", "................", "................",
+  ]);
   A.defSprite("o_bush", [
     "................", "................", "................", "......000.......",
     "....00ggg00.....", "...0gggGggg0....", "..0ggGgggggG0...", "..0gGgggGggg0...",
@@ -60,6 +74,24 @@
         if (v === 1) { px("#2a2418", 8, 9, 5, 2); px("#2a2418", 7, 10, 3, 2); px("#342d1e", 9, 9, 2, 1); px("#4a4032", 14, 15, 2, 1); px("#4a4032", 5, 16, 1, 1); }
         if (v === 2) { px("#c9b3ff", 16, 6, 1, 1); px("#fff6df", 5, 17, 1, 1); px("#ffd35a", 12, 13, 1, 1); }
         px("#122018", 0, 23, 24, 1); px("#122018", 23, 0, 1, 24);
+      } else if (style === "meadow") {
+        px("#3e7a34", 0, 0, 24, 24); px("#4a8a3c", 1, 1, 22, 22);
+        for (let i = 0; i < 30; i++) { const x = 1 + Math.floor(rnd() * 22), y = 2 + Math.floor(rnd() * 21); px(rnd() < 0.5 ? "#5ea24a" : "#3f7c36", x, y, 1, 2); }
+        if (v === 1) { px("#fff6df", 6, 8, 1, 1); px("#ffd35a", 7, 9, 1, 1); px("#fff6df", 16, 15, 1, 1); px("#ff9ec4", 12, 5, 1, 1); }
+        if (v === 2) { px("#6b5a3a", 9, 12, 4, 2); px("#7d6a46", 10, 12, 2, 1); }
+        px("#356a2e", 0, 23, 24, 1); px("#356a2e", 23, 0, 1, 24);
+      } else if (style === "beach") {
+        px("#a88a5a", 0, 0, 24, 24); px("#bc9e6e", 1, 1, 22, 22);
+        for (let i = 0; i < 18; i++) px(rnd() < 0.5 ? "#d6bc8e" : "#b0925e", 2 + Math.floor(rnd() * 20), 2 + Math.floor(rnd() * 20), 1, 1);
+        if (v === 1) { px("#a88a5a", 4, 10, 16, 1); px("#a88a5a", 7, 14, 12, 1); }
+        if (v === 2) { px("#f0e6d0", 15, 6, 2, 1); px("#ff9ec4", 6, 17, 2, 1); }
+        px("#a88a5a", 0, 23, 24, 1); px("#a88a5a", 23, 0, 1, 24);
+      } else if (style === "snow") {
+        px("#a8b8d0", 0, 0, 24, 24); px("#c4d2e4", 1, 1, 22, 22);
+        for (let i = 0; i < 14; i++) px(rnd() < 0.5 ? "#dfe8f4" : "#b0c0d6", 2 + Math.floor(rnd() * 20), 2 + Math.floor(rnd() * 20), 2, 1);
+        if (v === 1) { px("#b4c4dc", 5, 9, 9, 1); px("#b4c4dc", 11, 10, 6, 1); }
+        if (v === 2) { px("#9aa8bc", 15, 14, 3, 2); px("#b4c4dc", 16, 14, 1, 1); }
+        px("#b4c4dc", 0, 23, 24, 1); px("#b4c4dc", 23, 0, 1, 24);
       } else if (style === "brick") {
         px("#11191c", 0, 0, 24, 24);
         for (let row = 0; row < 4; row++) {
@@ -150,6 +182,23 @@
       });
       ctx.fillStyle = "#2a2226"; ctx.fillRect(-12, -10, w + 24, 4);
     },
+    meadow(ctx, w) {
+      // a low wooden fence and tall grass; the open sky stays in view
+      for (let x = -10; x < w + 12; x += 30) { ctx.fillStyle = "#4a3222"; ctx.fillRect(x, -30, 5, 24); ctx.fillStyle = "#6e4a30"; ctx.fillRect(x, -30, 2, 24); }
+      ctx.fillStyle = "#6e4a30"; ctx.fillRect(-12, -26, w + 24, 3); ctx.fillRect(-12, -16, w + 24, 3);
+      ctx.fillStyle = "#3e7a34";
+      for (let x = -12; x < w + 12; x += 4) { const h = 6 + ((x * 7) % 10); ctx.fillRect(x, -6 - h, 2, h); }
+    },
+    coast(ctx, w) {
+      // a low dark ledge with surf at its foot
+      ctx.fillStyle = "#3a4450"; ctx.fillRect(-12, -18, w + 24, 12);
+      for (let x = -12; x < w + 12; x += 18) { ctx.fillStyle = "#4a5664"; ctx.fillRect(x, -24 + ((x * 5) % 6), 14, 8); }
+      ctx.fillStyle = "#e8f4ff"; for (let x = -12; x < w + 12; x += 7) ctx.fillRect(x, -8, 4, 2);
+    },
+    snow(ctx, w) {
+      // soft drifts
+      for (let i = 0; i < 12; i++) { ctx.fillStyle = i % 2 ? "#dfe8f4" : "#c6d4e6"; A.pellipse(ctx, -12 + i * 32, -8, 26, 12, true); }
+    },
     vista(ctx, w) {
       // only a broken balustrade: the sky and the distant ridges stay visible
       ctx.fillStyle = "#2e2220"; ctx.fillRect(-12, -22, w + 24, 16);
@@ -167,6 +216,12 @@
   function corner(style, ctx, cx, cy, t) {
     const f = Math.floor(t / 110) % 3;
     ctx.fillStyle = C.ink;
+    if (style === "post") {
+      ctx.fillRect(cx - 2, cy - 20, 5, 24); ctx.fillStyle = "#6e4a30"; ctx.fillRect(cx - 1, cy - 19, 3, 22);
+      ctx.fillStyle = C.ink; ctx.fillRect(cx + 2, cy - 20, 10, 7);
+      ctx.fillStyle = f === 1 ? "#ff8a2a" : "#e8453c"; ctx.fillRect(cx + 3, cy - 19, 8 - f, 5);
+      return;
+    }
     if (style === "lamp") {
       ctx.fillRect(cx - 2, cy - 18, 4, 22); ctx.fillStyle = "#3a3450"; ctx.fillRect(cx - 1, cy - 17, 2, 20);
       ctx.fillStyle = C.ink; ctx.fillRect(cx - 5, cy - 26, 10, 9);
@@ -213,6 +268,24 @@
       for (let i = 0; i < 30; i++) { g.fillStyle = "#ffb060"; g.fillRect(Math.floor(rnd() * 180), 70 + Math.floor(rnd() * 28), 1, 1); }
       g.fillStyle = "rgba(255,110,40,0.18)"; g.fillRect(0, 80, 180, 24);
     },
+    meadow(g, rnd) {
+      g.fillStyle = "#fff6d0"; A.pellipse(g, 140, 30, 10, 10, true);
+      for (let i = 0; i < 7; i++) { g.fillStyle = "rgba(255,255,255,0.85)"; const x = Math.floor(rnd() * 170), y = 12 + Math.floor(rnd() * 50); g.fillRect(x, y, 18 + Math.floor(rnd() * 20), 4); g.fillRect(x + 4, y - 3, 10, 3); }
+      const hills = (base, amp, col) => { g.fillStyle = col; for (let x = 0; x < 180; x += 2) { const y = base + Math.sin(x / 22 + base) * amp; g.fillRect(x, y, 2, 320 - y); } };
+      hills(96, 6, "#7ab07a"); hills(108, 5, "#5a9656"); hills(120, 4, "#447c40");
+    },
+    coast(g, rnd) {
+      g.fillStyle = "#fff6d0"; A.pellipse(g, 46, 40, 9, 9, true);
+      for (let i = 0; i < 5; i++) { g.fillStyle = "rgba(255,255,255,0.8)"; g.fillRect(Math.floor(rnd() * 160), 14 + Math.floor(rnd() * 40), 24, 3); }
+      g.fillStyle = "#3a78b0"; g.fillRect(0, 92, 180, 228);
+      g.fillStyle = "#4a8ac4"; for (let y = 96; y < 140; y += 5) for (let x = (y * 3) % 11; x < 180; x += 13) g.fillRect(x, y, 5, 1);
+      g.fillStyle = "#fff6d0"; for (let y = 94; y < 120; y += 3) g.fillRect(40 + Math.floor(rnd() * 12), y, 3, 1);
+      g.fillStyle = "#56708a"; g.fillRect(118, 86, 30, 6); g.fillRect(126, 82, 12, 4);
+    },
+    snow(g, rnd) {
+      const ridge = (base, amp, col, cap) => { let y = base; for (let x = 0; x < 180; x += 2) { y += (rnd() - 0.5) * amp; y = Math.max(base - 20, Math.min(base + 6, y)); g.fillStyle = col; g.fillRect(x, y, 2, 320 - y); g.fillStyle = cap; g.fillRect(x, y, 2, 3); } };
+      ridge(96, 7, "#8a9ab4", "#f4f8ff"); ridge(110, 6, "#a8b8cc", "#ffffff"); ridge(124, 5, "#c6d4e6", "#ffffff");
+    },
     vista(g, rnd) {
       g.fillStyle = "#ffd9a0"; A.pellipse(g, 110, 92, 16, 16, true);
       g.fillStyle = "rgba(255,220,180,0.35)";
@@ -253,6 +326,24 @@
       bg: { top: "#1e1236", mid: "#8a3e5e", bot: "#e08a58", mote: ["#ffd0a0", "#ffb0c8", "#fff6df"], up: false, deco: BG.vista },
       light: { ambient: "#e6cac4", shaft: "255,200,140", shaftA: 0.085, corner: "255,170,90", bokeh: ["255,200,150", "255,170,200"] },
     },
+  };
+  L.meadow = {
+    name: "風の草原", tiles: tiles("meadow"), obstacles: ["o_bush", "o_greyrock", "o_stump"], back: BACK.meadow, corner: "post",
+    frame: ["#5a4230", "#8a6a48", "#3a2a1e"],
+    bg: { top: "#3e78c8", mid: "#86b8e4", bot: "#cfe6f0", mote: ["#fff6df", "#ffe9a8", "#c8f07a"], up: false, deco: BG.meadow },
+    light: { ambient: "#e8e4d6", bloom: 0.12, glow: 0.03, shaft: "255,245,210", shaftA: 0.05, corner: "255,220,160", bokeh: ["255,250,220", "220,240,255"] },
+  };
+  L.coast = {
+    name: "潮騒の岬", tiles: tiles("beach"), obstacles: ["o_greyrock", "o_drift", "o_crate"], back: BACK.coast, corner: "post",
+    frame: ["#6a5438", "#9a7e56", "#44361f"],
+    bg: { top: "#4a86cc", mid: "#8cc0e8", bot: "#d8ecf4", mote: ["#ffffff", "#e8f4ff"], up: true, deco: BG.coast },
+    light: { ambient: "#dcdad4", bloom: 0.08, glow: 0.02, shaft: "255,245,220", shaftA: 0.04, corner: "255,220,170", bokeh: ["255,255,235", "200,230,255"] },
+  };
+  L.snow = {
+    name: "白嶺の雪原", tiles: tiles("snow"), obstacles: ["o_snowrock", "o_pine", "o_pine"], back: BACK.snow, corner: "post",
+    frame: ["#8a9ab4", "#c6d4e6", "#5a6a84"],
+    bg: { top: "#8ea4c4", mid: "#c4d2e4", bot: "#eef4fa", mote: ["#ffffff", "#e8f0ff", "#ffffff"], up: false, deco: BG.snow },
+    light: { ambient: "#c8d0e0", bloom: 0.04, glow: 0.0, shaft: "235,245,255", shaftA: 0.03, corner: "255,210,160", bokeh: ["235,245,255", "255,255,255"] },
   };
   L.boss = Object.assign({}, L.temple, {
     name: "灰冠の玉座",

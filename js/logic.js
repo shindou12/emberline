@@ -195,8 +195,8 @@
   function pickLocation(rng, node) {
     if (node.type === "boss") return "boss";
     const row = node.row || 0;
-    const table = row <= 1 ? [["forest", 3], ["vista", 3], ["city", 2]]
-      : row <= 3 ? [["city", 3], ["forest", 2], ["tunnel", 2], ["vista", 1]]
+    const table = row <= 1 ? [["meadow", 3], ["coast", 3], ["forest", 2], ["vista", 2]]
+      : row <= 3 ? [["snow", 2], ["coast", 1], ["city", 3], ["forest", 2], ["vista", 2], ["tunnel", 1]]
       : [["tunnel", 3], ["temple", 3], ["city", 1]];
     let r = rng() * table.reduce((s, t) => s + t[1], 0);
     for (const [id, w] of table) { r -= w; if (r < 0) return id; }

@@ -938,7 +938,7 @@
       ctx.globalCompositeOperation = "multiply";
       ctx.drawImage(this.lc, 0, 0, 360, 640);
       ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = 0.14;
+      ctx.globalAlpha = LT.glow != null ? LT.glow : 0.14;
       ctx.drawImage(this.lc, 0, 0, 360, 640);
       ctx.restore();
       // 1b. bloom: downsample, crush midtones (x^3) so only bright areas remain, add back blurred
@@ -951,9 +951,10 @@
       ctx.save();
       ctx.imageSmoothingEnabled = true;
       ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = this.bloom;
+      const bloom = LT.bloom != null ? LT.bloom : this.bloom;
+      ctx.globalAlpha = bloom;
       ctx.drawImage(this.bl, 0, 0, 360, 640);
-      ctx.globalAlpha = this.bloom * 0.5;
+      ctx.globalAlpha = bloom * 0.5;
       ctx.drawImage(this.bl, -8, -8, 376, 656);
       ctx.restore();
       // 2. depth of field: the far wall melts into haze
