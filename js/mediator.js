@@ -902,7 +902,7 @@
         v.fx.burst(r.x + r.s / 2, r.y + r.s / 2, 50, { speed: [60, 260], life: [500, 1100], palette: ["#ff4d5e", "#ff8a2a", "#7af0ff"], sizes: [2, 4], glow: true, ay: -60 });
       }
       v.bg.pulse = 1; EL.tween(v.bg, { pulse: 0.4 }, 900, { clock: "ui" });
-      await this.banner("ARMOR", "灰冠が覚醒した — 弱点以外の攻撃は半減", "#ff8a2a", 1300);
+      await this.banner("AWAKEN", "灰冠が覚醒した — 手下が増え、灰の波が強まる", "#ff8a2a", 1300);
     }
     async ev_victory() { await EL.wait(60); }
     async ev_heroDown() { await EL.wait(60); }

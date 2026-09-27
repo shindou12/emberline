@@ -591,8 +591,9 @@
         case "shadow": T.forcedWeak += info.power; break;
         case "ring": {
           const poly = data.poly;
-          const onRoute = (e) => T.route.some((t) => covers(e, t.x, t.y));
-          const targets = alive().filter((e) => !onRoute(e) && pointInPoly(e.x + e.size / 2, e.y + e.size / 2, poly));
+          // everything inside the ring, and everything touching the ring itself
+          const touching = (e) => poly.some((t) => Math.max(Math.abs(Math.max(e.x, Math.min(e.x + e.size - 1, t.x)) - t.x), Math.abs(Math.max(e.y, Math.min(e.y + e.size - 1, t.y)) - t.y)) <= 1);
+          const targets = alive().filter((e) => pointInPoly(e.x + e.size / 2, e.y + e.size / 2, poly) || touching(e));
           data.targets = targets.map((e) => e.uid);
           targets.forEach((e) => { if (e.alive && !done) hit(e, info.power); });
           break;
@@ -665,7 +666,6 @@
             T.attacks++;
             let dmg = base;
             if (weak) { dmg = Math.floor(dmg * S.weakMult); T.weakHits++; }
-            if (e.boss && st.phase2 && !weak) dmg = Math.ceil(dmg / 2);
             rec.attacks.push({ uid: e.uid, dmg, weak, forced, sealed, kill: e.hp - dmg <= 0, bonus });
             damage(e, dmg, "hero", rec, { weak, forced, sealed, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
             const moved = !done && e.alive ? shove(e, d, rec) : false;
@@ -892,8 +892,8 @@
       if (e.boss) {
         rotate(e);
         const minions = alive().filter((m) => !m.boss).length;
-        if (B.phase2) { if (minions < 2) summon("husk"); if (minions < 3) summon("wisp"); }
-        else if (minions < 2) summon("husk");
+        // one guard at a time; two once awakened
+        if (minions < (B.phase2 ? 2 : 1)) summon("husk");
       }
       if (d.ai === "chase" || (d.ai === "slow" && B.turn % 2 === 0)) chase(e);
       else if (d.ai === "flee") flee(e);

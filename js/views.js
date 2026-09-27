@@ -797,7 +797,7 @@
         ctx.fillStyle = "#ffffff"; ctx.fillRect(x, y, bw, 2);
         ctx.globalAlpha = 0.25; ctx.fillStyle = "#000"; ctx.fillRect(x, y, bw, 2); ctx.globalAlpha = 1;
         A.text(ctx, String(shown), x + bw + 2, y - 3, { s: 1, color: C.cream });
-        if (this.boss && this.phase2) A.text(ctx, "ARMOR", r.x + r.s / 2, r.y - 10, { s: 2, align: "center", color: "#ff8a2a" });
+        if (this.boss && this.phase2) A.text(ctx, "AWAKEN", r.x + r.s / 2, r.y - 10, { s: 2, align: "center", color: "#ff8a2a" });
       }
     }
     drawTarget(ctx, r) {
