@@ -5,6 +5,10 @@
   const BAL = {
     GW: 7, GH: 8, // board size (tiles)
     trailBase: 5, trailPer: 3, // ember trail length = base + per * companions
+    pushDist: 2, // survivors are shoved this many tiles along your line
+    tangleMax: 3, // enemies that can pile into one tile
+    bump: 1, // collision damage
+    tangleRefund: 1, // moves regained for creating a tangle
     coolMin: 2, // embers always cool at least this many tiles per turn
     deepTurn: 4, // from this turn on, the night deepens: every enemy presses +1
     healAfterBattle: 4,
@@ -15,20 +19,20 @@
 
   const HEROES = {
     kai: {
-      name: "カイ", title: "燠の剣士", sprite: "kai", hp: 36, atk: 3, mov: 5, refund: 2,
+      name: "カイ", title: "燠の剣士", sprite: "kai", hp: 36, atk: 3, mov: 7, refund: 2,
       trait: "背撃の達人", traitText: "ウィークサイド攻撃の倍率が×2.5になる。",
       style: "バランス型。背後を取って切り抜けろ。", color: "#e8453c",
       stats: { hp: 3, atk: 3, mov: 3 },
     },
     rue: {
-      name: "ルゥ", title: "風の槍兵", sprite: "rue", hp: 30, atk: 3, mov: 6, refund: 2,
+      name: "ルゥ", title: "風の槍兵", sprite: "rue", hp: 30, atk: 3, mov: 8, refund: 2,
       trait: "突進", traitText: "攻撃の直前にまっすぐ進んだマス数だけ攻撃+1（最大+3）。",
       style: "連鎖型。長い直線で突き抜け、倒して走り続けろ。", color: "#3fd6c0",
       stats: { hp: 2, atk: 3, mov: 4 },
     },
     gorm: {
-      name: "ゴルム", title: "灰の重騎士", sprite: "gorm", hp: 42, atk: 4, mov: 4, refund: 2,
-      trait: "鉄壁", traitText: "各ターン最初の反撃を無効化する。",
+      name: "ゴルム", title: "灰の重騎士", sprite: "gorm", hp: 42, atk: 4, mov: 6, refund: 2,
+      trait: "鉄壁", traitText: "各ターン最初の警戒を無効化する。押し出しが1マス伸びる。",
       style: "重装型。少ない歩数で確実に砕け。", color: "#b8862e",
       stats: { hp: 4, atk: 4, mov: 2 },
     },
@@ -39,49 +43,49 @@
   const COMPANIONS = {
     pip: {
       name: "ピップ", title: "灯持ちの従者", sprite: "pip", color: "#ffd35a",
-      cond: { type: "straight", n: 4 }, condText: "直進4", condLong: "同じ方向へ4マス続けて進む",
+      cond: { type: "straight", n: 3 }, condText: "直進3", condLong: "同じ方向へ3マス続けて進む",
       skill: "閃光の矢", skillText: "進行方向にいる最初の敵に5ダメージ", effect: "pierce", power: 5,
     },
     mira: {
       name: "ミラ", title: "燠火の魔女", sprite: "mira", color: "#ff8a2a",
-      cond: { type: "corner", a: 2, b: 2 }, condText: "L字", condLong: "2マス直進→直角に曲がって2マス",
+      cond: { type: "corner", a: 2, b: 1 }, condText: "L字", condLong: "2マス直進→直角に曲がって1マス",
       skill: "爆ぜ火", skillText: "曲がり角の周囲3×3の敵に3ダメージ", effect: "burst", power: 3,
     },
     tock: {
       name: "トック", title: "ぜんまい従機", sprite: "tock", color: "#d3dbea",
-      cond: { type: "zigzag", n: 4 }, condText: "ジグザグ", condLong: "2つの方向を交互に4歩",
+      cond: { type: "zigzag", n: 3 }, condText: "ジグザグ", condLong: "2つの方向を交互に3歩",
       skill: "加速機構", skillText: "移動+3", effect: "haste", power: 3,
     },
     wren: {
       name: "レン", title: "灰森の射手", sprite: "wren", color: "#8fe07a",
-      cond: { type: "kills", n: 2 }, condText: "撃破2", condLong: "このターンに2体撃破",
+      cond: { type: "tangle", n: 1 }, condText: "もつれ", condLong: "敵を押し出して、もつれを作る",
       skill: "追い撃ち", skillText: "HPの低い敵2体に3ダメージ", effect: "volley", power: 3,
     },
     bram: {
       name: "ブラム", title: "盾の老兵", sprite: "bram", color: "#fff6df",
-      cond: { type: "hurt", n: 4 }, condText: "被弾4", condLong: "このターンに4ダメージ以上受ける",
-      skill: "不屈", skillText: "HP5回復＋次の反撃を1回無効", effect: "guard", power: 5,
+      cond: { type: "guard", n: 2 }, condText: "警戒2", condLong: "警戒範囲に2回踏み込む",
+      skill: "不屈", skillText: "HP5回復＋次の警戒を1回無効", effect: "guard", power: 5,
     },
     sable: {
       name: "セーブル", title: "影猫", sprite: "sable", color: "#b08cff",
-      cond: { type: "weak", n: 2 }, condText: "背撃2", condLong: "このターンにウィークサイド攻撃2回",
+      cond: { type: "weak", n: 1 }, condText: "背撃", condLong: "ウィークサイドから1回攻撃する",
       skill: "影渡り", skillText: "次の2回の攻撃が必ずウィークサイドになる", effect: "shadow", power: 2,
     },
     luna: {
       name: "ルナ", title: "月環の巫女", sprite: "luna", color: "#7fd8ff",
-      cond: { type: "loop", n: 5 }, condText: "円を描く", condLong: "5歩以上の輪を描き、自分の道に隣接して閉じる",
+      cond: { type: "loop", n: 4 }, condText: "円を描く", condLong: "4歩以上の輪を描き、自分の道に隣接して閉じる",
       skill: "月の環", skillText: "輪の内側の敵すべてに4ダメージ", effect: "ring", power: 4,
     },
   };
 
   const ENEMIES = {
-    husk: { name: "殻喰い", sprite: "husk", hp: 4, atk: 2, pressure: 1, desc: "灰を喰らう虚ろの虫。" },
-    wisp: { name: "鬼火", sprite: "wisp", hp: 2, atk: 1, pressure: 2, rotates: true, desc: "脆いが圧が高い。弱点が毎ターン回る。" },
-    shield: { name: "盾持ち", sprite: "shield", hp: 6, atk: 3, pressure: 1, desc: "正面は硬い。背後を狙え。" },
-    caller: { name: "呼び声", sprite: "caller", hp: 3, atk: 1, pressure: 1, summons: true, desc: "毎ターン殻喰いを呼び寄せる。" },
-    totem: { name: "結界柱", sprite: "totem", hp: 5, atk: 0, pressure: 1, seals: true, desc: "立っている間、他の敵の弱点を封じる。" },
-    brute: { name: "骨砕き", sprite: "brute", hp: 7, atk: 5, pressure: 3, desc: "強敵。反撃が重い。" },
-    boss: { name: "灰冠の王ヴォルグ", sprite: "boss", hp: 40, atk: 3, pressure: 3, size: 2, boss: true, desc: "深層の主。弱点は毎ターン巡り、眷属を呼ぶ。" },
+    husk: { name: "殻喰い", sprite: "husk", hp: 7, atk: 1, pressure: 1, ai: "chase", tele: "adjacent", teleDmg: 3, desc: "近づいてきて噛みつく。背中を向けて歩く。" },
+    wisp: { name: "鬼火", sprite: "wisp", hp: 4, atk: 0, pressure: 1, rotates: true, ai: "static", tele: "line", teleDmg: 2, desc: "動かず、直線上に火を吐く。弱点が毎ターン回る。" },
+    shield: { name: "盾持ち", sprite: "shield", hp: 10, atk: 2, pressure: 1, ai: "static", desc: "その場で広く警戒する。背後を狙え。" },
+    caller: { name: "呼び声", sprite: "caller", hp: 6, atk: 1, pressure: 1, summons: true, ai: "flee", desc: "逃げ回りながら殻喰いを呼ぶ。" },
+    totem: { name: "結界柱", sprite: "totem", hp: 8, atk: 0, pressure: 1, seals: true, ai: "static", desc: "立っている間、他の敵は全方位を警戒する。" },
+    brute: { name: "骨砕き", sprite: "brute", hp: 13, atk: 3, pressure: 2, ai: "slow", tele: "cross", teleDmg: 5, desc: "2ターンに1歩。十字に大槌を振り下ろす。" },
+    boss: { name: "灰冠の王ヴォルグ", sprite: "boss", hp: 54, atk: 2, pressure: 3, size: 2, boss: true, ai: "static", tele: "boss", teleDmg: 4, desc: "深層の主。弱点は毎ターン巡り、灰の波で列を薙ぐ。押し出せない。" },
   };
 
   /* Relics change *how* you draw routes, not just numbers. */
@@ -89,7 +93,7 @@
     boots: { name: "燠の長靴", rarity: 1, icon: "r_boots", desc: "最大移動+1。" },
     fang: { name: "狩人の牙", rarity: 1, icon: "r_fang", desc: "撃破時の移動回復+1。" },
     dirk: { name: "背刺しの短剣", rarity: 2, icon: "r_dirk", desc: "ウィークサイド攻撃のダメージ倍率+1。" },
-    gauntlet: { name: "鉄の手甲", rarity: 1, icon: "r_gauntlet", desc: "各ターン、最初に受ける反撃を無効化。" },
+    gauntlet: { name: "鉄の手甲", rarity: 1, icon: "r_gauntlet", desc: "警戒で受けるダメージ−1。" },
     hourglass: { name: "灰の砂時計", rarity: 1, icon: "r_hourglass", desc: "足跡の長さ−3。盤面が広く使える。" },
     banner: { name: "群れの旗", rarity: 2, icon: "r_banner", desc: "仲間1人につき攻撃+1。" },
     heart: { name: "狂戦士の心臓", rarity: 1, icon: "r_heart", desc: "HPが半分以下の間、攻撃+2。" },
@@ -98,7 +102,7 @@
     charm: { name: "曲がり角の護符", rarity: 2, icon: "r_charm", desc: "仲間の発動条件が1段階ゆるくなる。" },
     twin: { name: "二度咲きの灯", rarity: 2, icon: "r_twin", desc: "仲間の能力が1ターンに2回まで発動する。" },
     coal: { name: "冷えた炭", rarity: 2, icon: "r_coal", desc: "ターン終了時、敵1体ごとの圧−1。" },
-    aegis: { name: "灯火の盾", rarity: 1, icon: "r_aegis", desc: "斜めから攻撃した敵は反撃しない。" },
+    aegis: { name: "灯火の盾", rarity: 1, icon: "r_aegis", desc: "斜めに踏み込んだときは警戒されない。" },
     compass: { name: "渦の羅針", rarity: 1, icon: "r_compass", desc: "輪を描いて閉じると移動+2（1ターン1回）。" },
     scorch: { name: "燃え跡", rarity: 2, icon: "r_scorch", desc: "ターン終了時、足跡に隣接する敵に2ダメージ。" },
     oath: { name: "初撃の誓い", rarity: 1, icon: "r_oath", desc: "各ターン最初の攻撃は必ずウィークサイド。" },
@@ -106,6 +110,11 @@
     plume: { name: "不死鳥の羽", rarity: 2, icon: "r_plume", desc: "一度だけ、倒れてもHP10で立ち上がる。" },
     afterglow: { name: "余熱", rarity: 1, icon: "r_afterglow", desc: "余った移動1につき、ターン終了ダメージ−1。" },
     lantern: { name: "大灯籠", rarity: 1, icon: "r_lantern", desc: "攻撃+1。ただし足跡の長さ+4。" },
+    brawn: { name: "剛腕", rarity: 1, icon: "r_gauntlet", desc: "押し出しが1マス伸びる。" },
+    impact: { name: "衝撃の鋲", rarity: 1, icon: "r_sigil", desc: "衝突ダメージが2倍になる。" },
+    rope: { name: "絡め縄", rarity: 2, icon: "r_chain", desc: "もつれを作ると移動+2（通常+1）。もつれは4体まで重なる。" },
+    shade: { name: "影歩き", rarity: 1, icon: "r_plume", desc: "各ターン最初の警戒を無視する。" },
+    emberhand: { name: "燠の手", rarity: 1, icon: "r_scorch", desc: "燃える足跡に押し込んだ敵に+2ダメージ。" },
   };
 
   const EVENTS = {
@@ -152,7 +161,18 @@
     boss: { name: "灰冠の王", icon: "n_boss", color: "#ffd35a" },
   };
 
+  /* battle objectives: an action and its reward are shown before the fight */
+  const OBJECTIVES = {
+    chain3: { label: "3連鎖", desc: "1ターンに3体以上を連続撃破する" },
+    multi: { label: "まとめ撃破", desc: "もつれた敵を2体同時に倒す" },
+    weak3: { label: "背撃3", desc: "ウィークサイドから3回攻撃する" },
+    bump3: { label: "衝突3", desc: "押し出しで3回ぶつける" },
+    noguard: { label: "警戒ゼロ", desc: "一度も警戒されずに勝つ" },
+    fast2: { label: "2ターン", desc: "2ターン以内に全滅させる" },
+    friendly: { label: "同士討ち", desc: "敵の攻撃予告で敵を倒させる" },
+  };
+
   const CHAIN_LABELS = ["", "", "DOUBLE", "TRIPLE", "BLAZE", "INFERNO", "EMBERSTORM"];
 
-  EL.Data = { BAL, HEROES, COMPANIONS, ENEMIES, RELICS, EVENTS, NODE_INFO, CHAIN_LABELS };
+  EL.Data = { BAL, HEROES, COMPANIONS, ENEMIES, RELICS, EVENTS, NODE_INFO, CHAIN_LABELS, OBJECTIVES };
 })(window.EL);

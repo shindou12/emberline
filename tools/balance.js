@@ -12,7 +12,7 @@ function score(res, B, run) {
   const alive = res.st.enemies.filter((e) => e.alive);
   const pressure = L.pressureOf(run, B, alive);
   if (res.outcome === "dead") return -1e6;
-  if (res.outcome === "victory") return 1e5 + T.hp * 10;
+  if (res.outcome === "victory") return 1e5 + T.hp * 10 + T.bumps;
   if (res.endBlocked) return -1e5;
   // positional sense: stay close to a weak-side entry, keep room to move
   const end = res.end;
@@ -22,7 +22,9 @@ function score(res, B, run) {
     near = Math.min(near, Math.max(Math.abs(e.x - end.x), Math.abs(e.y - end.y)) + 1);
   }
   const room = L.reachable(B, L.blockedSet(B, res.T.route), end, 3).size;
-  return T.kills * 30 + dmg * 3 - (run.hp - T.hp) * 4 - pressure * 6 + T.moves * 0.5 - near * 3 + room * 0.4;
+  const hpLeft = T.hp - res.teleEnd;
+  if (hpLeft - pressure <= 0) return -5e5;
+  return T.kills * 30 + dmg * 3 - (run.hp - hpLeft) * 4 - pressure * 6 + T.moves * 0.5 - near * 3 + room * 0.4 + T.tangles * 4;
 }
 function bestRoute(B, run, beam = 70) {
   let frontier = [{ route: [{ x: B.hero.x, y: B.hero.y }], res: null }];
@@ -49,6 +51,12 @@ function bestRoute(B, run, beam = 70) {
   }
   return best;
 }
+const objStats = {};
+function claim(run, B, turn) {
+  const got = L.claimObjectives(run, B);
+  for (const o of B.objectives) { const k = objStats[o.id] = objStats[o.id] || [0, 0]; k[1]++; if (got.includes(o)) k[0]++; }
+  return { win: true, turns: turn };
+}
 function battle(run, node, log) {
   const B = L.genBattle(run, node);
   for (let turn = 1; turn <= 20; turn++) {
@@ -57,10 +65,10 @@ function battle(run, node, log) {
     let res;
     if (route) { res = L.simulate(B, run, route); L.commitRoute(B, run, route, res); }
     else { B.lastT = { moves: 0 }; res = { outcome: "ok" }; }
-    if (res.outcome === "victory") return { win: true, turns: turn };
+    if (res.outcome === "victory") return claim(run, B, turn);
     if (res.outcome === "dead") return { win: false, turns: turn };
     const evs = L.enemyPhase(B, run);
-    if (evs.some((e) => e.type === "victory")) return { win: true, turns: turn };
+    if (evs.some((e) => e.type === "victory")) return claim(run, B, turn);
     if (evs.some((e) => e.type === "heroDown")) return { win: false, turns: turn };
   }
   return { win: false, turns: 20, timeout: true };
@@ -111,6 +119,7 @@ for (const h of heroes) {
   const avg = (a) => (a.reduce((x, y) => x + y, 0) / a.length).toFixed(2);
   console.log(`${h}: win ${wins}/${N}  avgTurns ${(turnSum / battles).toFixed(2)}  ` + Object.entries(perType).map(([k, v]) => `${k}:${avg(v)}`).join(" ") + "  deaths " + JSON.stringify(deaths));
 }
+console.log("objectives", Object.entries(objStats).map(([k, [a, b]]) => `${k}:${a}/${b}`).join(" "));
 if (process.env.DETAIL) {
   for (let i = 0; i < 6; i++) {
     const r = playRun(process.env.DETAIL, 1000 + i * 7919);

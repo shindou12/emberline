@@ -118,6 +118,7 @@
       this.interactive = true; this.inputKind = "route";
       this.tiles = new Array(GW * GH).fill(0);
       this.dim = 0; this.reach = null; this.entries = []; this.entryEmph = 0; this.t = 0; this.cursor = null; this.heroTile = null; this.heroHint = 0;
+      this.guards = []; this.teles = []; this.guardEmph = 0; this.heroEnd = null;
     }
     /* raw pointer → route input event (geometry only; legality decided elsewhere) */
     routeInput(phase, p) {
@@ -189,6 +190,8 @@
           ctx.fillRect(px + T - 3 - L, py + T - 5, L, 2); ctx.fillRect(px + T - 5, py + T - 3 - L, 2, L);
         }
       }
+      this.drawTeles(ctx);
+      this.drawGuardZones(ctx);
       // weak-side approach pads: "charge in from here"
       if (this.entries.length) {
         const e = this.entryEmph;
@@ -213,6 +216,54 @@
       }
     }
   }
+  /* enemy attack announcements: tiles that will be struck next enemy phase */
+  BoardView.prototype.drawTeles = function (ctx) {
+    if (!this.teles.length) return;
+    const sum = new Map();
+    for (const t of this.teles) { const k = t.y * GW + t.x; sum.set(k, (sum.get(k) || 0) + t.dmg); }
+    const pulse = 0.5 + 0.5 * Math.sin(this.t / 160);
+    for (const [k, dmg] of sum) {
+      const x = k % GW, y = Math.floor(k / GW), px = x * T, py = y * T;
+      const hero = this.heroEnd && this.heroEnd.x === x && this.heroEnd.y === y;
+      ctx.globalAlpha = (hero ? 0.42 : 0.24) + 0.14 * pulse;
+      A.dither(ctx, px + 2, py + 2, T - 4, T - 4, "#ff3a2a", Math.floor(this.t / 240) % 2);
+      ctx.globalAlpha = 1;
+      // hazard corners
+      ctx.fillStyle = hero ? "#ffd35a" : "#ff5a3a";
+      const L = 10;
+      ctx.fillRect(px + 1, py + 1, L, 3); ctx.fillRect(px + 1, py + 1, 3, L);
+      ctx.fillRect(px + T - 1 - L, py + 1, L, 3); ctx.fillRect(px + T - 4, py + 1, 3, L);
+      ctx.fillRect(px + 1, py + T - 4, L, 3); ctx.fillRect(px + 1, py + T - 1 - L, 3, L);
+      ctx.fillRect(px + T - 1 - L, py + T - 4, L, 3); ctx.fillRect(px + T - 4, py + T - 1 - L, 3, L);
+      // damage tag
+      const tx = px + 5, ty = py + T - 17;
+      ctx.fillStyle = C.ink; ctx.fillRect(tx - 1, ty - 1, 26, 14);
+      ctx.fillStyle = hero ? "#ffd35a" : "#c0241a"; ctx.fillRect(tx, ty, 24, 12);
+      A.text(ctx, "!" + dmg, tx + 12, ty + 2, { s: 1, align: "center", color: hero ? C.ink : "#fff6df" });
+    }
+  };
+  /* guard zones: stepping in costs HP (dashed, stronger while drawing) */
+  BoardView.prototype.drawGuardZones = function (ctx) {
+    if (!this.guards.length) return;
+    const sum = new Map();
+    for (const g of this.guards) { const k = g.y * GW + g.x; sum.set(k, (sum.get(k) || 0) + g.dmg); }
+    const a = 0.35 + 0.5 * this.guardEmph;
+    const march = Math.floor(this.t / 120) % 4;
+    for (const [k, dmg] of sum) {
+      const x = k % GW, y = Math.floor(k / GW), px = x * T + 4, py = y * T + 4, w = T - 8;
+      ctx.globalAlpha = a * 0.25;
+      ctx.fillStyle = "#6a2a5a"; ctx.fillRect(px, py, w, w);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = "#ff6a9a";
+      for (let i = 0; i < w; i += 8) {
+        const o = (i + march * 2) % w;
+        ctx.fillRect(px + o, py, 4, 2); ctx.fillRect(px + w - o - 4, py + w - 2, 4, 2);
+        ctx.fillRect(px, py + w - o - 4, 2, 4); ctx.fillRect(px + w - 2, py + o, 2, 4);
+      }
+      if (this.guardEmph > 0.3) A.text(ctx, "-" + dmg, px + w - 3, py + 3, { s: 1, align: "right", color: "#ffb0c8" });
+      ctx.globalAlpha = 1;
+    }
+  };
   V.BoardView = BoardView;
 
   /* the ember trail: every tile walked burns until it cools */
@@ -322,6 +373,7 @@
       super("RoutePreview");
       this.pts = []; this.endMoves = 0; this.endOk = true; this.dead = false; this.t = 0; this.consumed = 0;
       this.skillMarks = []; this.areas = []; this.finger = null; this.bad = null;
+      this.pushes = []; this.guardHits = []; this.teleEnd = 0;
     }
     tick(dt) { this.t += dt; }
     draw(ctx) {
@@ -402,6 +454,21 @@
           A.text(ctx, "X", c.x, c.y - 6, { s: 3, align: "center", color: "#ff4d5e" });
         }
       }
+      this.drawPushes(ctx);
+      for (const g of this.guardHits) {
+        const c = tc(g.x, g.y);
+        const bx = c.x - 22, by = c.y - 22;
+        ctx.fillStyle = C.ink; ctx.fillRect(bx - 1, by - 1, 22, 14);
+        ctx.fillStyle = g.blocked ? "#2c4a7a" : "#8f2231"; ctx.fillRect(bx, by, 20, 12);
+        A.text(ctx, g.blocked ? "0" : "-" + g.dmg, bx + 10, by + 2, { s: 1, align: "center", color: g.blocked ? C.move : "#ffb0c8" });
+      }
+      if (tip && this.teleEnd > 0 && pts.length > 1) {
+        const c = tc(tip.x, tip.y);
+        const bx = c.x + 14, by = c.y - 6, f = Math.floor(this.t / 140) % 2;
+        ctx.fillStyle = C.ink; ctx.fillRect(bx - 2, by, 24, 16);
+        ctx.fillStyle = f ? "#ffd35a" : "#ff8a2a"; ctx.fillRect(bx, by + 2, 20, 12);
+        A.text(ctx, "!" + this.teleEnd, bx + 10, by + 4, { s: 1, align: "center", color: C.ink });
+      }
       // companion trigger markers along the route
       for (const m of this.skillMarks) {
         const c = tc(m.x, m.y);
@@ -424,6 +491,38 @@
       }
     }
   }
+  /* predicted shoves: arrow along the slide, a star where it slams, a knot where it tangles */
+  RoutePreviewView.prototype.drawPushes = function (ctx) {
+    for (const p of this.pushes) {
+      const pts = [p.from].concat(p.path);
+      const f = Math.floor(this.t / 120) % 2;
+      for (let k = 1; k < pts.length; k++) {
+        const a = tc(pts[k - 1].x, pts[k - 1].y), b = tc(pts[k].x, pts[k].y);
+        ctx.fillStyle = C.ink; A.pline(ctx, a.x, a.y, b.x, b.y, 7);
+        ctx.fillStyle = f ? "#ffb020" : "#ffd35a"; A.pline(ctx, a.x, a.y, b.x, b.y, 3);
+      }
+      const end = pts[pts.length - 1], c = tc(end.x, end.y);
+      const d = p.dir || [0, 0];
+      if (pts.length > 1) {
+        ctx.fillStyle = C.ink; ctx.fillRect(c.x + d[0] * 6 - 5, c.y + d[1] * 6 - 5, 10, 10);
+        ctx.fillStyle = "#ffd35a"; ctx.fillRect(c.x + d[0] * 6 - 3, c.y + d[1] * 6 - 3, 6, 6);
+      }
+      if (!p.stop) continue;
+      if (p.stop === "tangle") {
+        const bob = f * 2;
+        ctx.fillStyle = C.ink; ctx.fillRect(c.x - 12, c.y - 30 - bob, 24, 16);
+        ctx.fillStyle = "#b08cff"; ctx.fillRect(c.x - 10, c.y - 28 - bob, 20, 12);
+        A.jp(ctx, "絡", c.x, c.y - 31 - bob, { size: 12, align: "center", color: C.cream, ow: 1 });
+      } else {
+        // impact star just past the end of the slide
+        const sx = c.x + d[0] * 22, sy = c.y + d[1] * 22;
+        const r = 5 + f * 2;
+        ctx.fillStyle = C.ink; ctx.fillRect(sx - r - 1, sy - 2, r * 2 + 2, 4); ctx.fillRect(sx - 2, sy - r - 1, 4, r * 2 + 2);
+        ctx.fillStyle = "#fff6df"; ctx.fillRect(sx - r, sy - 1, r * 2, 2); ctx.fillRect(sx - 1, sy - r, 2, r * 2);
+        ctx.fillStyle = "#ffd35a"; ctx.fillRect(sx - 3, sy - 3, 6, 6);
+      }
+    }
+  };
   V.RoutePreviewView = RoutePreviewView;
 
   /* hero & companions */
@@ -476,7 +575,8 @@
       this.uid = e.uid; this.type = e.type; this.sprite = d.sprite; this.size = e.size || 1;
       this.tx = e.x; this.ty = e.y; this.hp = e.hp; this.maxHp = e.maxHp; this.shownHp = e.hp;
       this.weak = e.weak; this.sealed = false; this.pressure = e.pressure; this.boss = !!e.boss;
-      this.emph = 0; this.target = false; this.kill = false; this.dmg = null; this.dmgWeak = false; this.counter = null; this.blocked = false;
+      this.emph = 0; this.target = false; this.kill = false; this.dmg = null; this.dmgWeak = false; this.guardDmg = null; this.blocked = false;
+      this.tangled = false; this.sox = 0; this.soy = 0; this.push = null;
       this.flash = 0; this.ox = 0; this.oy = 0; this.t = Math.random() * 1000; this.spin = 0; this.phase2 = false; this.intent = d.summons ? "summon" : null;
       this.flip = false; this.dead = false; this.lunge = 0;
     }
@@ -490,7 +590,7 @@
       ctx.globalAlpha = 0.35;
       A.dither(ctx, r.x + 4, r.y + 4, r.s - 8, r.s - 8, this.phase2 ? "#ff4d5e" : "#5c34b0", Math.floor(this.t / 300) % 2);
       ctx.globalAlpha = 1;
-      this.drawGuards(ctx, r);
+      if (!this.tangled) this.drawGuards(ctx, r);
       // pressure flames (top-left)
       for (let i = 0; i < this.pressure; i++) {
         const fx = r.x + 5 + i * 6, fy = r.y + 5;
@@ -502,7 +602,7 @@
       // sprite
       const s = this.boss ? 3 : 2;
       const bob = this.type === "wisp" ? Math.round(Math.sin(this.t / 200) * 2) * 2 : 0;
-      const sx = cx + U.snap(this.ox), sy = bottom + U.snap(this.oy) + bob;
+      const sx = cx + U.snap(this.ox + this.sox), sy = bottom + U.snap(this.oy + this.soy) + bob;
       ctx.fillStyle = "rgba(0,0,0,0.45)";
       A.pellipse(ctx, cx, bottom + 1, this.boss ? 34 : 12, 4, true);
       A.spr(ctx, this.sprite, sx, sy, { s, flip: this.flip, white: this.flash, alpha: this.kill ? 0.75 : 1 });
@@ -511,6 +611,14 @@
         const k = Math.floor(this.t / 120) % 2;
         A.spr(ctx, "i_skull", cx, r.y + r.s / 2 + 2 - k * 2, { s: 3 });
         if (this.refund) A.text(ctx, "+" + this.refund, r.x + r.s - 4, r.y + 2, { s: 2, align: "right", color: C.heal });
+      }
+      if (this.tangled) {
+        // tangled: rope loops around the pile, stunned stars
+        const k = Math.floor(this.t / 160) % 2;
+        ctx.fillStyle = C.ink; ctx.fillRect(r.x + 6, r.y + r.s / 2 + 1, r.s - 12, 6);
+        ctx.fillStyle = "#b08cff"; ctx.fillRect(r.x + 7, r.y + r.s / 2 + 2, r.s - 14, 4);
+        ctx.fillStyle = "#e9dcff"; for (let i = 0; i < 4; i++) ctx.fillRect(r.x + 9 + i * 9 + k * 2, r.y + r.s / 2 + 2, 3, 2);
+        for (let i = 0; i < 2; i++) { const a = this.t / 300 + i * Math.PI; ctx.fillStyle = C.emberL; ctx.fillRect(U.snap(cx + Math.cos(a) * 12) - 1, U.snap(r.y + 8 + Math.sin(a) * 3) - 1, 3, 3); }
       }
       if (this.intent === "summon") {
         const k = Math.floor(this.t / 200) % 2;
@@ -625,11 +733,11 @@
         A.text(ctx, String(this.dmg), cx, r.y - 16, { s: 3, align: "center", color: col, grad: this.dmgWeak ? "#fff6df" : null });
         if (this.dmgWeak) A.text(ctx, "WEAK", cx, r.y - 26, { s: 1, align: "center", color: C.emberL });
       }
-      if (this.counter) {
+      if (this.guardDmg) {
         const bx = r.x + r.s - 4, by = r.y + r.s - 12;
         ctx.fillStyle = C.ink; ctx.fillRect(bx - 10, by - 4, 24, 14);
         ctx.fillStyle = "#5a1020"; ctx.fillRect(bx - 8, by - 2, 20, 10);
-        A.text(ctx, "-" + this.counter, bx + 2, by - 1, { s: 1, align: "center", color: "#ff8f8f" });
+        A.text(ctx, "-" + this.guardDmg, bx + 2, by - 1, { s: 1, align: "center", color: "#ff8f8f" });
       } else if (this.blocked) {
         A.spr(ctx, "i_shield", r.x + r.s - 6, r.y + r.s - 2, { s: 2 });
       }
@@ -1076,7 +1184,7 @@
   V.MoveHUD = MoveHUD;
 
   class PressureHUD extends EL.Node {
-    constructor() { super("PressureHUD"); this.x = 186; this.y = 470; this.value = 0; this.prev = null; this.t = 0; this.pulse = 0; }
+    constructor() { super("PressureHUD"); this.x = 186; this.y = 470; this.value = 0; this.prev = null; this.t = 0; this.pulse = 0; this.tele = 0; this.telePrev = null; }
     tick(dt) { this.t += dt; }
     draw(ctx) {
       A.panel(ctx, 0, 0, 162, 46, { fill: "#241428", rim: "#5a2a4a", hi: "#b08cff" });
@@ -1084,13 +1192,58 @@
       A.jp(ctx, "夜の圧", 40, 4, { size: 16, color: C.dim });
       const v = this.prev != null ? this.prev : this.value;
       const col = this.prev != null && this.prev < this.value ? C.heal : "#ff8f9b";
-      if (this.prev != null && this.prev !== this.value) {
-        A.text(ctx, "-" + this.value, 40, 26, { s: 2, color: C.mute });
-        A.text(ctx, "-" + v, 150, 18, { s: 3, align: "right", color: col });
-      } else A.text(ctx, "-" + v, 150, 18, { s: 3, align: "right", color: col });
+      A.text(ctx, "-" + v, 150, 18, { s: 3, align: "right", color: col });
+      // announced enemy strikes on the tile you will end on
+      const tl = this.telePrev != null ? this.telePrev : this.tele;
+      if (tl > 0) {
+        const f = Math.floor(this.t / 150) % 2;
+        A.jp(ctx, "予告", 40, 25, { size: 12, color: f ? "#ffd35a" : "#ff8a2a", ow: 1 });
+        A.text(ctx, "-" + tl, 70, 26, { s: 2, color: "#ffb020" });
+      } else if (this.prev != null && this.prev !== this.value) A.text(ctx, "-" + this.value, 40, 26, { s: 2, color: C.mute });
     }
   }
   V.PressureHUD = PressureHUD;
+
+  /* battle objectives: an action and the reward it pays, shown up front */
+  class ObjectiveChip extends EL.Node {
+    constructor(i) {
+      super("Objective" + i);
+      this.w = 82; this.h = 24; this.x = 190 + i * 84; this.y = 52;
+      this.interactive = true; this.inputKind = "button"; this.id = "objective"; this.payload = { index: i };
+      this.obj = null; this.state = "open"; this.t = 0; this.pop = 0;
+    }
+    tick(dt) { this.t += dt; }
+    draw(ctx) {
+      const o = this.obj;
+      if (!o) return;
+      const done = this.state === "done", failed = this.state === "failed";
+      const b = -U.snap(this.pop * 4);
+      ctx.fillStyle = C.ink; ctx.fillRect(0, b, this.w, this.h);
+      ctx.fillStyle = done ? "#5a4210" : failed ? "#1a1624" : this.pressed ? "#3a2f58" : "#241c38"; ctx.fillRect(1, b + 1, this.w - 2, this.h - 2);
+      ctx.fillStyle = done ? C.gold : failed ? "#3a3448" : "#5a4a82"; ctx.fillRect(1, b + 1, this.w - 2, 2);
+      // reward icon
+      const r = o.reward;
+      ctx.fillStyle = "#120e1c"; ctx.fillRect(3, b + 3, 18, 18);
+      if (r.kind === "relic") A.spr(ctx, D.RELICS[r.id].icon, 12, b + 20, { s: 1, alpha: failed ? 0.4 : 1 });
+      else if (r.kind === "comp") A.spr(ctx, D.COMPANIONS[r.id].sprite, 12, b + 21, { s: 1, alpha: failed ? 0.4 : 1 });
+      else A.spr(ctx, "i_heart", 12, b + 19, { s: 1, alpha: failed ? 0.4 : 1 });
+      A.jp(ctx, D.OBJECTIVES[o.id].label, 25, b + 5, { size: 12, color: done ? "#fff6df" : failed ? C.mute : C.cream, ow: 1 });
+      if (failed) { ctx.fillStyle = "#ff4d5e"; ctx.fillRect(22, b + 11, this.w - 26, 2); }
+      if (done && Math.floor(this.t / 300) % 2) { ctx.fillStyle = "rgba(255,240,180,0.25)"; ctx.fillRect(1, b + 1, this.w - 2, this.h - 2); }
+    }
+  }
+  class ObjectiveHUD extends EL.Node {
+    constructor() { super("ObjectiveHUD"); this.chips = [0, 1].map((i) => this.add(new ObjectiveChip(i))); }
+    setObjectives(list) { this.chips.forEach((c, i) => { c.obj = list[i] || null; c.state = "open"; c.visible = !!c.obj; }); }
+    setStates(states) {
+      this.chips.forEach((c, i) => {
+        const s = states[i];
+        if (!s || s === c.state) return;
+        c.state = s; c.pop = 1; EL.tween(c, { pop: 0 }, 300, { clock: "ui", ease: U.ease.outBack });
+      });
+    }
+  }
+  V.ObjectiveHUD = ObjectiveHUD;
 
   class CompanionCard extends EL.Node {
     constructor(i) {
@@ -1487,11 +1640,15 @@
 
   const HELP = [
     { t: "ルートを描く", b: "主人公から指をすべらせて、進む道を描く。斜めにも進める。指を離すと、その道を一気に駆け抜ける。", demo: "route" },
-    { t: "敵を切り抜ける", b: "道の途中に敵がいれば、通り抜けざまに斬る。倒しきれないと反撃を受ける。道の終点は空きマスでなければならない。", demo: "attack" },
-    { t: "ウィークサイド", b: "盾に囲まれていない光る側面が弱点。矢印の方向からまっすぐ突っ込むと、大ダメージで反撃も受けない。", demo: "weak" },
+    { t: "敵を切り抜ける", b: "道の途中に敵がいれば、通り抜けざまに斬る。倒しきれなかった敵は進行方向へ2マス押し出される。終点は空きマスで。", demo: "attack" },
+    { t: "ウィークサイド", b: "盾に囲まれていない光る側面が弱点。矢印の方向からまっすぐ突っ込むと大ダメージ。", demo: "weak" },
+    { t: "警戒", b: "敵の盾側のまわり（点線のマス）は警戒エリア。踏み込むと敵1体につき1回ダメージ。弱点側からなら警戒されない。", demo: "guard" },
+    { t: "押し出しともつれ", b: "押された敵は壁・足跡・敵にぶつかると衝突ダメージ。敵にぶつかると同じマスに絡まり「もつれ」になる（移動+1）。もつれは警戒せず、斬れば全員が弱点ダメージ。", demo: "push" },
+    { t: "攻撃予告", b: "赤いマスは次の敵ターンに攻撃が来る場所。そこで終わると被弾。敵を押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
     { t: "撃破で移動回復", b: "敵を倒すたびに移動力が回復する。倒して、進んで、また倒す。長い連鎖が勝利への近道。", demo: "chain" },
     { t: "燠火の足跡", b: "歩いたマスは燃えて、しばらく入れない。斜めに交差するのはOK。仲間が増えるほど足跡は長く残る。", demo: "ember" },
     { t: "夜の圧", b: "ターン終了時、生き残った敵の数だけダメージを受ける。紫の炎の数がその敵の圧。のんびりしていると押し潰される。", demo: "pressure" },
+    { t: "戦闘目標", b: "右上の2つの札は、この戦闘の目標と報酬。達成して勝つと、その報酬がもらえる。欲しいものがあれば狙ってみよう。", demo: "route" },
     { t: "仲間の力", b: "仲間はルートの「形」で能力を発動する。直進、L字、ジグザグ、輪…。描く道そのものが作戦になる。", demo: "comp" },
   ];
   class HelpView extends ModalBase {
@@ -1536,9 +1693,41 @@
         if (dead) { A.text(ctx, "+2", c.x, c.y - 10, { s: 2, align: "center", color: C.heal }); }
       });
       const head = path.length ? cell(...path[Math.max(0, n - 1)]) : cell(2, 5);
-      A.spr(ctx, "kai", head.x, head.y + 16, { s: 2 });
+      if (!["guard", "push", "tele"].includes(kind)) A.spr(ctx, "kai", head.x, head.y + 16, { s: 2 });
       if (kind === "comp" && n >= 5) { A.spr(ctx, "pip", head.x - 40, head.y + 16, { s: 2 }); ctx.fillStyle = C.emberL; A.pline(ctx, head.x, head.y, cell(4, 1).x, cell(4, 1).y, 4); }
       if (kind === "pressure") { const c = cell(2, 5); A.spr(ctx, "kai", c.x, c.y + 16, { s: 2 }); A.text(ctx, "-6", c.x, c.y - 30, { s: 3, align: "center", color: "#ff8f9b" }); }
+      const fl = Math.floor(t / 200) % 2;
+      if (kind === "guard") {
+        const e = cell(3, 2);
+        for (let y = 1; y <= 3; y++) for (let x = 2; x <= 4; x++) {
+          if ((x === 3 && y === 2) || y === 3) continue;
+          const c = cell(x, y);
+          ctx.fillStyle = "#ff6a9a";
+          for (let i = 0; i < 32; i += 8) { ctx.fillRect(c.x - 16 + i, c.y - 16, 4, 2); ctx.fillRect(c.x - 16 + i, c.y + 14, 4, 2); ctx.fillRect(c.x - 16, c.y - 16 + i, 2, 4); ctx.fillRect(c.x + 14, c.y - 16 + i, 2, 4); }
+        }
+        for (let x = 2; x <= 4; x++) { const c = cell(x, 3); ctx.globalAlpha = 0.5; A.dither(ctx, c.x - 14, c.y - 14, 28, 28, C.weak, fl); ctx.globalAlpha = 1; }
+        A.spr(ctx, "shield", e.x, e.y + 16, { s: 2 });
+        ctx.fillStyle = C.weak; ctx.fillRect(e.x - 14, e.y + 16, 28, 4);
+        A.text(ctx, "-2", cell(2, 1).x, cell(2, 1).y - 6, { s: 2, align: "center", color: "#ffb0c8" });
+        A.text(ctx, "OK", cell(3, 3).x, cell(3, 3).y - 6, { s: 2, align: "center", color: C.heal });
+      }
+      if (kind === "push") {
+        const k = Math.min(1, prog * 1.4);
+        const ex = 2 + Math.min(2, Math.max(0, (k - 0.3) / 0.5) * 2);
+        const hero = cell(Math.min(2, k * 3.3), 4);
+        const other = cell(4, 4), me = cell(ex, 4);
+        ctx.fillStyle = "#ffd35a"; A.pline(ctx, cell(2, 4).x, cell(2, 4).y, cell(4, 4).x, cell(4, 4).y, 3);
+        A.spr(ctx, "wisp", other.x + (ex >= 4 ? 8 : 0), other.y + 16, { s: 2 });
+        A.spr(ctx, "husk", me.x - (ex >= 4 ? 8 : 0), me.y + 16, { s: 2 });
+        if (ex >= 4) { ctx.fillStyle = "#b08cff"; ctx.fillRect(other.x - 16, other.y + 4, 32, 4); A.jp(ctx, "もつれ！ 移動+1", other.x - 20, other.y - 48, { size: 16, align: "center", color: "#e9dcff" }); }
+        A.spr(ctx, "kai", hero.x, hero.y + 16, { s: 2 });
+      }
+      if (kind === "tele") {
+        const e = cell(3, 1);
+        for (let y = 2; y <= 4; y++) { const c = cell(3, y); ctx.globalAlpha = 0.55; A.dither(ctx, c.x - 18, c.y - 18, 36, 36, "#ff3a2a", fl); ctx.globalAlpha = 1; A.text(ctx, "!2", c.x - 8, c.y + 6, { s: 1, color: "#fff6df" }); }
+        A.spr(ctx, "wisp", e.x, e.y + 16, { s: 2 });
+        const h = cell(1, 5); A.spr(ctx, "kai", h.x, h.y + 16, { s: 2 });
+      }
     }
   }
   V.HelpView = HelpView;

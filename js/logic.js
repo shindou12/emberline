@@ -135,7 +135,7 @@
 
   function makeEnemy(B, type, x, y, rng) {
     const d = D.ENEMIES[type];
-    const e = { uid: ++B.uidSeq, type, x, y, size: d.size || 1, hp: d.hp, maxHp: d.hp, atk: d.atk, pressure: d.pressure, weak: "D", alive: true, boss: !!d.boss };
+    const e = { uid: ++B.uidSeq, type, x, y, size: d.size || 1, hp: d.hp, maxHp: d.hp, atk: d.atk, pressure: d.pressure, weak: "D", alive: true, boss: !!d.boss, tangled: false, tele: null };
     e.weak = pickWeak(B, e, rng);
     return e;
   }
@@ -172,7 +172,7 @@
 
   function genBattle(run, node) {
     const rng = run.rng;
-    const B = { w: BAL.GW, h: BAL.GH, tiles: new Array(BAL.GW * BAL.GH).fill(0), enemies: [], hero: { x: 3, y: 7 }, trail: [], turn: 1, kind: node.type, isBoss: node.type === "boss", phase2: false, uidSeq: 0, row: node.row };
+    const B = { w: BAL.GW, h: BAL.GH, tiles: new Array(BAL.GW * BAL.GH).fill(0), enemies: [], hero: { x: 3, y: 7 }, trail: [], turn: 1, kind: node.type, isBoss: node.type === "boss", phase2: false, uidSeq: 0, row: node.row, bst: { chain: 0, weak: 0, bumps: 0, multi: 0, guardHits: 0, friendly: 0 }, objectives: [] };
     B.trail = [{ x: 3, y: 7 }];
     if (B.isBoss) {
       for (const [x, y] of [[0, 4], [6, 4], [1, 0], [5, 0]]) B.tiles[idx(B, x, y)] = 1;
@@ -182,6 +182,8 @@
       B.enemies.push(makeEnemy(B, "husk", 0, 2, rng));
       B.enemies.push(makeEnemy(B, "husk", 6, 2, rng));
       B.enemies.push(makeEnemy(B, "wisp", 3, 4, rng));
+      B.objectives = genObjectives(run, B);
+      planTelegraphs(B);
       return B;
     }
     // rocks
@@ -213,10 +215,13 @@
       if (!spot) break;
       B.enemies.push(makeEnemy(B, type, spot[0], spot[1], rng));
     }
+    B.objectives = genObjectives(run, B);
+    planTelegraphs(B);
     return B;
   }
 
-  /* ---------- route rules ---------- */
+  /* ---------- geometry & rules ---------- */
+  const enemiesAt = (enemies, x, y) => enemies.filter((e) => e.alive && covers(e, x, y));
   function blockedSet(B, route) {
     const s = new Set();
     for (const t of B.trail) s.add(idx(B, t.x, t.y));
@@ -245,6 +250,7 @@
   const dirEq = (a, b) => a[0] === b[0] && a[1] === b[1];
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
   const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+  const sgn = (v) => (v > 0 ? 1 : v < 0 ? -1 : 0);
 
   function pointInPoly(px, py, poly) {
     let inside = false;
@@ -255,26 +261,91 @@
     return inside;
   }
 
+  /* Guard zone (replaces counterattacks): the 8 neighbours of an enemy except
+     the ones on its weak side. Stepping in costs HP once per enemy per route. */
+  function inGuard(enemies, e, t) {
+    if (!e.alive || e.tangled || e.atk <= 0) return false;
+    if (covers(e, t.x, t.y)) return false;
+    const nx = Math.max(e.x, Math.min(e.x + e.size - 1, t.x)), ny = Math.max(e.y, Math.min(e.y + e.size - 1, t.y));
+    const dx = t.x - nx, dy = t.y - ny;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== 1) return false;
+    if (sealedBy(enemies, e)) return true;
+    const w = CARD[e.weak];
+    return dx * w[0] + dy * w[1] <= 0;
+  }
+  function guardTiles(B, enemies) {
+    const out = [];
+    for (const e of enemies) {
+      if (!e.alive || e.tangled || e.atk <= 0) continue;
+      for (let y = e.y - 1; y <= e.y + e.size; y++) for (let x = e.x - 1; x <= e.x + e.size; x++) {
+        if (isRock(B, x, y) || !inGuard(enemies, e, { x, y })) continue;
+        out.push({ x, y, uid: e.uid, dmg: e.atk });
+      }
+    }
+    return out;
+  }
+
+  /* ---------- telegraphs (Into the Breach style) ----------
+     Enemies announce the tiles they will strike at the start of the next enemy
+     phase. The pattern is stored relative to the enemy, so shoving an enemy
+     drags its attack along (and can aim it at other enemies). */
+  function planTele(B, e) {
+    const d = D.ENEMIES[e.type];
+    e.tele = null;
+    if (!d.tele || !e.alive) return;
+    const h = B.hero;
+    const cx = e.x + (e.size - 1) / 2, cy = e.y + (e.size - 1) / 2;
+    let sx = sgn(h.x - cx), sy = sgn(h.y - cy);
+    if (!sx && !sy) sy = 1;
+    const tiles = [];
+    switch (d.tele) {
+      case "adjacent": tiles.push([sx, sy]); break;
+      case "line": {
+        const alongX = Math.abs(h.x - cx) >= Math.abs(h.y - cy);
+        const dx = alongX ? sx || 1 : 0, dy = alongX ? 0 : sy || 1;
+        for (let k = 1; k <= 3; k++) { if (isRock(B, e.x + dx * k, e.y + dy * k)) break; tiles.push([dx * k, dy * k]); }
+        break;
+      }
+      case "cross": for (const [ox, oy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) tiles.push([sx + ox, sy + oy]); break;
+      case "boss":
+        if (B.turn % 2 === 1) for (let x = 0; x < B.w; x++) { tiles.push([x - e.x, 2]); tiles.push([x - e.x, 3]); }
+        else for (let y = 0; y < B.h; y++) { tiles.push([-1, y - e.y]); tiles.push([2, y - e.y]); }
+        break;
+    }
+    e.tele = {
+      tiles: tiles.filter(([dx, dy]) => !(dx >= 0 && dy >= 0 && dx < e.size && dy < e.size)),
+      dmg: d.teleDmg + (e.boss && B.phase2 ? 2 : 0),
+    };
+  }
+  function planTelegraphs(B) { for (const e of B.enemies) if (e.alive) planTele(B, e); }
+  function teleTiles(B, e) {
+    if (!e.tele || !e.alive || e.tangled) return [];
+    return e.tele.tiles.map(([dx, dy]) => ({ x: e.x + dx, y: e.y + dy })).filter((t) => inB(B, t.x, t.y) && !isRock(B, t.x, t.y));
+  }
+  function teleDmgAt(B, enemies, x, y) {
+    let n = 0;
+    for (const e of enemies) if (teleTiles(B, e).some((t) => t.x === x && t.y === y)) n += e.tele.dmg;
+    return n;
+  }
+
   /* companion condition thresholds (the charm relic relaxes each by one notch) */
   function condReq(run, comp) {
     const c = D.COMPANIONS[comp].cond;
     const r = has(run, "charm") ? 1 : 0;
     switch (c.type) {
       case "straight": return { n: Math.max(2, c.n - r) };
-      case "corner": return { a: c.a, b: Math.max(1, c.b - r) };
-      case "zigzag": return { n: Math.max(3, c.n - r) };
-      case "kills": return { n: Math.max(1, c.n - r) };
-      case "hurt": return { n: Math.max(1, c.n - 2 * r) };
-      case "weak": return { n: Math.max(1, c.n - r) };
+      case "corner": return { a: Math.max(1, c.a - r), b: c.b };
+      case "zigzag": return { n: Math.max(2, c.n - r) };
       case "loop": return { n: Math.max(3, c.n - r) };
+      default: return { n: Math.max(1, c.n - r) };
     }
-    return {};
   }
+  const markOf = (T, comp) => T.marks[comp] || { dirs: 0, weak: 0, route: 0, tangle: 0, guard: 0 };
 
-  /* progress 0..1 and a detail object for the HUD */
+  /* progress for the HUD */
   function condProgress(run, comp, T) {
     const c = D.COMPANIONS[comp].cond, q = condReq(run, comp);
-    const mk = T.marks[comp] || { dirs: 0, kills: 0, hurt: 0, weak: 0, route: 0 };
+    const mk = markOf(T, comp);
     const dirs = T.dirs.slice(mk.dirs);
     let cur = 0, need = 1;
     switch (c.type) {
@@ -308,8 +379,8 @@
         }
         break;
       }
-      case "kills": need = q.n; cur = T.kills - mk.kills; break;
-      case "hurt": need = q.n; cur = T.dmgTaken - mk.hurt; break;
+      case "tangle": need = q.n; cur = T.tangles - mk.tangle; break;
+      case "guard": need = q.n; cur = T.guardEntered - mk.guard; break;
       case "weak": need = q.n; cur = T.weakHits - mk.weak; break;
       case "loop": need = q.n; cur = Math.min(q.n - 1, T.route.length - 1 - mk.route); break;
     }
@@ -319,17 +390,17 @@
   function cloneBattleState(B) {
     return { enemies: B.enemies.map((e) => Object.assign({}, e)), phase2: B.phase2, w: B.w, h: B.h, tiles: B.tiles, trail: B.trail };
   }
+  function pushDist(run) { return BAL.pushDist + (has(run, "brawn") ? 1 : 0) + (run.heroId === "gorm" ? 1 : 0); }
 
   /* ---------- the route simulator ---------- */
   function simulate(B, run, route) {
     const st = cloneBattleState(B);
     const S0 = stats(run);
-    const hero = D.HEROES[run.heroId];
     const T = {
       moves: S0.mov, hp: run.hp, chain: 0, kills: 0, weakHits: 0, dmgTaken: 0, attacks: 0,
-      counterBlock: (has(run, "gauntlet") ? 1 : 0) + (run.heroId === "gorm" ? 1 : 0),
+      guardBlock: (run.heroId === "gorm" ? 1 : 0) + (has(run, "shade") ? 1 : 0), guarded: new Set(), guardEntered: 0, guardHits: 0,
       forcedWeak: 0, uses: {}, marks: {}, dirs: [], straight: 0, route: [route[0]],
-      compassUsed: false, plumeUsed: run.plumeUsed, heals: 0,
+      compassUsed: false, plumeUsed: run.plumeUsed, bumps: 0, tangles: 0, multi: 0,
     };
     const events = [], steps = [];
     let outcome = "ok", last = 0, done = false;
@@ -341,7 +412,7 @@
       T.hp = Math.min(run.maxHp, T.hp + n);
       if (T.hp > before) push({ type: "heal", amount: T.hp - before, hp: T.hp });
     };
-    function kill(e, src, stepRec) {
+    function kill(e, src, rec) {
       e.alive = false;
       T.kills++; T.chain++;
       let refund = stats(run, T.hp).refund;
@@ -350,33 +421,78 @@
       T.moves += refund;
       push({ type: "kill", uid: e.uid, refund, chain: T.chain, moves: T.moves, src, x: e.x, y: e.y, size: e.size });
       if (bonusHeal) heal(bonusHeal);
-      if (stepRec) stepRec.kills.push(e.uid);
+      if (rec) rec.kills.push(e.uid);
       if (!alive().length) { outcome = "victory"; push({ type: "victory" }); done = true; }
     }
-    function damage(e, dmg, src, stepRec, extra) {
+    function damage(e, dmg, src, rec, extra) {
       e.hp -= dmg;
-      push(Object.assign({ type: src === "hero" ? "attack" : "skillHit", uid: e.uid, dmg, hp: Math.max(0, e.hp), maxHp: e.maxHp }, extra || {}));
+      const type = src === "hero" ? "attack" : src === "bump" ? "bump" : "skillHit";
+      push(Object.assign({ type, uid: e.uid, dmg, hp: Math.max(0, e.hp), maxHp: e.maxHp }, extra || {}));
       if (e.boss && !st.phase2 && e.hp > 0 && e.hp <= e.maxHp / 2) { st.phase2 = true; push({ type: "bossPhase", uid: e.uid }); }
-      if (e.hp <= 0) kill(e, src, stepRec);
+      if (e.hp <= 0) kill(e, src, rec);
     }
     function heroHurt(dmg, e) {
       T.hp -= dmg; T.dmgTaken += dmg;
-      push({ type: "counter", uid: e.uid, dmg, hp: Math.max(0, T.hp) });
+      push({ type: "guard", uid: e.uid, dmg, hp: Math.max(0, T.hp) });
       if (T.hp <= 0) {
         if (has(run, "plume") && !T.plumeUsed) { T.plumeUsed = true; T.hp = 10; push({ type: "revive", hp: 10 }); }
         else { outcome = "dead"; push({ type: "heroDown" }); done = true; }
       }
     }
 
-    function trySkills(i, stepRec) {
+    /* shove a survivor along the line of travel; walls, embers and bodies stop it */
+    function shove(e, d, rec) {
+      if (e.boss || e.size > 1) return;
+      const n = pushDist(run);
+      const ember = blockedSet(B, T.route);
+      const from = { x: e.x, y: e.y }, path = [];
+      let stop = null, other = [];
+      for (let k = 0; k < n; k++) {
+        const t = { x: e.x + d[0], y: e.y + d[1] };
+        if (isRock(B, t.x, t.y) || (d[0] && d[1] && isRock(B, e.x + d[0], e.y) && isRock(B, e.x, e.y + d[1]))) { stop = "wall"; break; }
+        if (ember.has(idx(B, t.x, t.y))) { stop = "ember"; break; }
+        const occ = enemiesAt(st.enemies, t.x, t.y).filter((o) => o !== e);
+        if (occ.length) {
+          other = occ;
+          if (occ.some((o) => o.boss)) { stop = "boss"; break; }
+          const cap = BAL.tangleMax + (has(run, "rope") ? 1 : 0);
+          if (occ.length + 1 <= cap) { e.x = t.x; e.y = t.y; path.push({ x: t.x, y: t.y }); stop = "tangle"; }
+          else stop = "full";
+          break;
+        }
+        e.x = t.x; e.y = t.y; path.push({ x: t.x, y: t.y });
+      }
+      push({ type: "push", uid: e.uid, from, path, stop, dir: d });
+      rec.pushes.push({ uid: e.uid, from, path, stop, dir: d });
+      const bump = BAL.bump * (has(run, "impact") ? 2 : 1);
+      if (!stop) return;
+      T.bumps++;
+      if (stop === "tangle") {
+        T.tangles++;
+        const members = enemiesAt(st.enemies, e.x, e.y);
+        members.forEach((m) => (m.tangled = true));
+        const gain = BAL.tangleRefund + (has(run, "rope") ? 1 : 0);
+        T.moves += gain;
+        push({ type: "tangle", uid: e.uid, x: e.x, y: e.y, uids: members.map((m) => m.uid), gain, moves: T.moves });
+      }
+      const extra = stop === "ember" && has(run, "emberhand") ? 2 : 0;
+      damage(e, bump + extra, "bump", rec, { reason: stop });
+      if (stop === "tangle" || stop === "full" || stop === "boss") {
+        const o = stop === "boss" ? other.find((x) => x.boss) : other[0];
+        if (!done && o && o.alive) damage(o, bump, "bump", rec, { reason: stop });
+      }
+    }
+
+    function trySkills(i, rec) {
       for (const comp of run.companions) {
         if (done) return;
         const maxUses = has(run, "twin") ? 2 : 1;
         if ((T.uses[comp] || 0) >= maxUses) continue;
         const info = D.COMPANIONS[comp], q = condReq(run, comp);
-        const mk = T.marks[comp] || { dirs: 0, kills: 0, hurt: 0, weak: 0, route: 0 };
+        const mk = markOf(T, comp);
         const dirs = T.dirs.slice(mk.dirs);
-        let ok = false, data = {};
+        let ok = false;
+        const data = {};
         const lastN = (n) => (dirs.length >= n ? dirs.slice(dirs.length - n) : null);
         switch (info.cond.type) {
           case "straight": { const L = lastN(q.n); ok = !!L && L.every((d) => dirEq(d, L[0])); break; }
@@ -394,35 +510,31 @@
             if (L) { const A = L[0], Bd = L[1]; ok = !dirEq(A, Bd) && L.every((d, k) => dirEq(d, k % 2 ? Bd : A)); }
             break;
           }
-          case "kills": ok = T.kills - mk.kills >= q.n; break;
-          case "hurt": ok = T.dmgTaken - mk.hurt >= q.n; break;
+          case "tangle": ok = T.tangles - mk.tangle >= q.n; break;
+          case "guard": ok = T.guardEntered - mk.guard >= q.n; break;
           case "weak": ok = T.weakHits - mk.weak >= q.n; break;
-          case "loop": {
-            for (let j = i - q.n; j >= mk.route; j--) {
-              if (cheb(T.route[j], T.route[i]) === 1) { ok = true; data.poly = T.route.slice(j, i + 1); break; }
-            }
+          case "loop":
+            for (let j = i - q.n; j >= mk.route; j--) if (cheb(T.route[j], T.route[i]) === 1) { ok = true; data.poly = T.route.slice(j, i + 1); break; }
             break;
-          }
         }
         if (!ok) continue;
         T.uses[comp] = (T.uses[comp] || 0) + 1;
-        T.marks[comp] = { dirs: T.dirs.length, kills: T.kills, hurt: T.dmgTaken, weak: T.weakHits, route: i };
-        runSkill(comp, info, i, data, stepRec);
+        T.marks[comp] = { dirs: T.dirs.length, weak: T.weakHits, route: i, tangle: T.tangles, guard: T.guardEntered };
+        runSkill(comp, info, i, data, rec);
       }
     }
-
-    function runSkill(comp, info, i, data, stepRec) {
+    function runSkill(comp, info, i, data, rec) {
       const here = T.route[i];
       const ev = push({ type: "skill", comp, effect: info.effect, i, data });
-      stepRec.skills.push({ comp, effect: info.effect, data, targets: [] });
-      const rec = stepRec.skills[stepRec.skills.length - 1];
-      const hit = (e, dmg) => { rec.targets.push({ uid: e.uid, dmg, kill: e.hp - dmg <= 0 }); damage(e, dmg, "skill", stepRec, { comp }); };
+      rec.skills.push({ comp, effect: info.effect, data, targets: [] });
+      const sk = rec.skills[rec.skills.length - 1];
+      const hit = (e, dmg) => { sk.targets.push({ uid: e.uid, dmg, kill: e.hp - dmg <= 0 }); damage(e, dmg, "skill", rec, { comp }); };
       switch (info.effect) {
         case "pierce": {
           const d = T.dirs[T.dirs.length - 1];
           let x = here.x + d[0], y = here.y + d[1], target = null;
           while (inB(B, x, y) && !isRock(B, x, y)) {
-            const e = enemyAt(st.enemies, x, y);
+            const e = enemiesAt(st.enemies, x, y)[0];
             if (e) { target = e; break; }
             x += d[0]; y += d[1];
           }
@@ -434,8 +546,7 @@
           const c = data.center;
           data.area = [];
           for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) data.area.push({ x: c.x + dx, y: c.y + dy });
-          const targets = alive().filter((e) => data.area.some((t) => covers(e, t.x, t.y)));
-          targets.forEach((e) => { if (e.alive && !done) hit(e, info.power); });
+          alive().filter((e) => data.area.some((t) => covers(e, t.x, t.y))).forEach((e) => { if (e.alive && !done) hit(e, info.power); });
           break;
         }
         case "haste": T.moves += info.power; ev.moves = T.moves; data.amount = info.power; break;
@@ -445,7 +556,7 @@
           targets.forEach((e) => { if (e.alive && !done) hit(e, info.power); });
           break;
         }
-        case "guard": T.counterBlock += 1; heal(info.power); break;
+        case "guard": T.guardBlock += 1; heal(info.power); break;
         case "shadow": T.forcedWeak += info.power; break;
         case "ring": {
           const poly = data.poly;
@@ -469,32 +580,60 @@
       last = i;
       const diag = d[0] !== 0 && d[1] !== 0;
       push({ type: "step", i, from: a, to: b, dir: d, diag, moves: T.moves });
-      const rec = { i, tile: b, attack: null, skills: [], kills: [], moves: 0, hp: 0, relic: null };
+      const rec = { i, tile: b, attack: null, attacks: [], skills: [], kills: [], pushes: [], guards: [], moves: 0, hp: 0, relic: null };
       steps.push(rec);
 
-      const e = enemyAt(st.enemies, b.x, b.y);
-      if (e) {
-        const sealed = sealedBy(st.enemies, e);
-        let weak = !sealed && isWeakEntry(e, a, b);
-        let forced = false;
-        if (!weak && T.forcedWeak > 0) { weak = true; forced = true; T.forcedWeak--; }
-        if (!weak && has(run, "oath") && T.attacks === 0) { weak = true; forced = true; }
-        T.attacks++;
+      // 1. stepping into guard zones
+      for (const e of alive()) {
+        if (T.guarded.has(e.uid) || !inGuard(st.enemies, e, b)) continue;
+        T.guarded.add(e.uid); T.guardEntered++;
+        if (has(run, "aegis") && diag) { push({ type: "guardBlocked", uid: e.uid, reason: "aegis" }); rec.guards.push({ uid: e.uid, blocked: true }); continue; }
+        if (T.guardBlock > 0) { T.guardBlock--; push({ type: "guardBlocked", uid: e.uid, reason: "guard" }); rec.guards.push({ uid: e.uid, blocked: true }); continue; }
+        const dmg = Math.max(0, e.atk - (has(run, "gauntlet") ? 1 : 0));
+        if (!dmg) continue;
+        T.guardHits++;
+        rec.guards.push({ uid: e.uid, dmg });
+        heroHurt(dmg, e);
+        if (done) break;
+      }
+      if (done) break;
+
+      // 2. passing through enemies
+      const hereE = enemiesAt(st.enemies, b.x, b.y);
+      if (hereE.length) {
         const S = stats(run, T.hp);
         let bonus = 0;
         if (run.heroId === "rue") bonus += Math.min(3, T.straight - 1);
         if (has(run, "sigil") && T.straight - 1 >= 3) bonus += 2;
-        let dmg = S.atk + bonus;
-        if (weak) { dmg = Math.floor(dmg * S.weakMult); T.weakHits++; }
-        if (e.boss && st.phase2 && !weak) dmg = Math.ceil(dmg / 2);
-        const wouldKill = e.hp - dmg <= 0;
-        rec.attack = { uid: e.uid, dmg, weak, forced, sealed, kill: wouldKill, counter: 0, blocked: false, bonus };
-        damage(e, dmg, "hero", rec, { weak, forced, sealed, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
-        if (!done && e.alive && !weak && e.atk > 0) {
-          if (has(run, "aegis") && diag) { push({ type: "counterBlocked", uid: e.uid, reason: "aegis" }); rec.attack.blocked = true; }
-          else if (T.counterBlock > 0) { T.counterBlock--; push({ type: "counterBlocked", uid: e.uid, reason: "guard" }); rec.attack.blocked = true; }
-          else { rec.attack.counter = e.atk; heroHurt(e.atk, e); }
+        const base = S.atk + bonus;
+        const tangled = hereE.length > 1 || hereE.some((e) => e.tangled);
+        if (tangled) {
+          // a tangled pile has no guard: every body in it takes a weak-side hit
+          let killed = 0;
+          for (const e of hereE) {
+            if (!e.alive || done) continue;
+            const dmg = Math.floor(base * S.weakMult);
+            T.weakHits++; T.attacks++;
+            rec.attacks.push({ uid: e.uid, dmg, weak: true, tangle: true, kill: e.hp - dmg <= 0 });
+            damage(e, dmg, "hero", rec, { weak: true, tangle: true, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
+            if (!e.alive) killed++;
+          }
+          T.multi = Math.max(T.multi, killed);
+        } else {
+          const e = hereE[0];
+          const sealed = sealedBy(st.enemies, e);
+          let weak = !sealed && isWeakEntry(e, a, b), forced = false;
+          if (!weak && T.forcedWeak > 0) { weak = true; forced = true; T.forcedWeak--; }
+          if (!weak && has(run, "oath") && T.attacks === 0) { weak = true; forced = true; }
+          T.attacks++;
+          let dmg = base;
+          if (weak) { dmg = Math.floor(dmg * S.weakMult); T.weakHits++; }
+          if (e.boss && st.phase2 && !weak) dmg = Math.ceil(dmg / 2);
+          rec.attacks.push({ uid: e.uid, dmg, weak, forced, sealed, kill: e.hp - dmg <= 0, bonus });
+          damage(e, dmg, "hero", rec, { weak, forced, sealed, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
+          if (!done && e.alive) shove(e, d, rec);
         }
+        rec.attack = rec.attacks[0] || null;
       }
       if (!done) trySkills(i, rec);
       if (!done && has(run, "compass") && !T.compassUsed) {
@@ -508,8 +647,9 @@
       rec.moves = T.moves; rec.hp = T.hp;
     }
     const endTile = route[last];
-    const endBlocked = outcome === "ok" && !!enemyAt(st.enemies, endTile.x, endTile.y);
-    return { events, steps, st, T, outcome, last, end: endTile, endBlocked };
+    const endBlocked = outcome === "ok" && enemiesAt(st.enemies, endTile.x, endTile.y).length > 0;
+    const teleEnd = outcome === "ok" ? teleDmgAt(B, st.enemies, endTile.x, endTile.y) : 0;
+    return { events, steps, st, T, outcome, last, end: endTile, endBlocked, teleEnd };
   }
 
   /* after a route is played out, make it the battle's truth */
@@ -524,23 +664,55 @@
     run.stats.maxChain = Math.max(run.stats.maxChain, res.T.chain);
     run.stats.bestRoute = Math.max(run.stats.bestRoute, res.last);
     run.stats.turns++;
+    const s = B.bst;
+    s.chain = Math.max(s.chain, res.T.chain);
+    s.weak += res.T.weakHits; s.bumps += res.T.bumps; s.multi = Math.max(s.multi, res.T.multi); s.guardHits += res.T.guardHits;
     B.lastT = res.T;
   }
 
   /* ---------- enemy phase (mutates B/run, returns events to replay) ---------- */
+  function occupied(B, x, y, self) {
+    return B.enemies.some((e) => e !== self && e.alive && covers(e, x, y)) || (x === B.hero.x && y === B.hero.y);
+  }
+  function freeFor(B, x, y, self, ember) {
+    return !isRock(B, x, y) && !ember.has(idx(B, x, y)) && !occupied(B, x, y, self);
+  }
+  function nearestFree(B, sx, sy, self) {
+    const ember = blockedSet(B);
+    const seen = new Set([idx(B, sx, sy)]), q = [[sx, sy]];
+    while (q.length) {
+      const [x, y] = q.shift();
+      for (const [dx, dy] of DIRS8) {
+        const nx = x + dx, ny = y + dy;
+        if (!inB(B, nx, ny) || seen.has(idx(B, nx, ny)) || isRock(B, nx, ny)) continue;
+        seen.add(idx(B, nx, ny));
+        if (freeFor(B, nx, ny, self, ember)) return { x: nx, y: ny };
+        q.push([nx, ny]);
+      }
+    }
+    return null;
+  }
   function enemyPhase(B, run) {
     const events = [];
     const rng = run.rng;
     const S = stats(run);
     const push = (ev) => { events.push(ev); return ev; };
     const alive = () => B.enemies.filter((e) => e.alive);
+    const hurtHero = (dmg, extra) => {
+      run.hp -= dmg;
+      push(Object.assign({ type: "heroHit", total: dmg, reduced: 0, hp: Math.max(0, run.hp) }, extra || {}));
+      if (run.hp <= 0) {
+        if (has(run, "plume") && !run.plumeUsed) { run.plumeUsed = true; run.hp = 10; push({ type: "revive", hp: 10 }); return false; }
+        run.hp = 0; push({ type: "heroDown" }); return true;
+      }
+      return false;
+    };
 
     // 1. embers scorch neighbours (relic)
     if (has(run, "scorch")) {
-      const trailTiles = B.trail;
       for (const e of alive()) {
         let adj = false;
-        for (const t of trailTiles) {
+        for (const t of B.trail) {
           for (let k = 0; k < e.size * e.size && !adj; k++) {
             const ex = e.x + (k % e.size), ey = e.y + Math.floor(k / e.size);
             if (Math.max(Math.abs(ex - t.x), Math.abs(ey - t.y)) === 1) adj = true;
@@ -555,13 +727,28 @@
       B.enemies = alive();
       if (!B.enemies.length) { push({ type: "victory" }); return events; }
     }
-    // 2. old embers cool down
-    const nCool = coolCount(run, B.trail.length);
-    if (nCool > 0) {
-      const cooled = B.trail.splice(0, nCool);
-      push({ type: "cool", tiles: cooled });
+    // 2. announced strikes land (tangled enemies are stunned and miss theirs)
+    for (const e of alive().slice()) {
+      if (!e.alive) continue;
+      const tiles = teleTiles(B, e);
+      if (!tiles.length) continue;
+      push({ type: "strike", uid: e.uid, tiles, dmg: e.tele.dmg });
+      for (const t of tiles) for (const o of enemiesAt(B.enemies, t.x, t.y)) {
+        if (o === e || !o.alive) continue;
+        o.hp -= e.tele.dmg;
+        push({ type: "friendly", uid: o.uid, by: e.uid, dmg: e.tele.dmg, hp: Math.max(0, o.hp) });
+        if (o.hp <= 0) { o.alive = false; B.bst.friendly++; run.stats.kills++; push({ type: "kill", uid: o.uid, refund: 0, chain: 0, src: "friendly", x: o.x, y: o.y, size: o.size }); }
+      }
+      if (tiles.some((t) => t.x === B.hero.x && t.y === B.hero.y)) {
+        if (hurtHero(e.tele.dmg, { src: "strike", uid: e.uid })) return events;
+      }
     }
-    // 3. the night presses in: each surviving enemy hurts the hero
+    B.enemies = alive();
+    if (!B.enemies.length) { push({ type: "victory" }); return events; }
+    // 3. old embers cool down
+    const nCool = coolCount(run, B.trail.length);
+    if (nCool > 0) push({ type: "cool", tiles: B.trail.splice(0, nCool) });
+    // 4. the night presses in (anti-turtling): each surviving enemy
     let total = 0;
     for (const e of alive()) {
       const p = enemyPressure(run, B, e);
@@ -577,24 +764,33 @@
         else { run.hp = 0; push({ type: "heroDown" }); return events; }
       }
     }
-    // 4. enemy actions
+    // 5. tangles come loose
+    const moved = [], seenTile = new Set();
+    for (const e of alive()) {
+      const k = idx(B, e.x, e.y);
+      if (!seenTile.has(k)) { seenTile.add(k); continue; }
+      const to = nearestFree(B, e.x, e.y, e);
+      if (to) { moved.push({ uid: e.uid, from: { x: e.x, y: e.y }, to }); e.x = to.x; e.y = to.y; seenTile.add(idx(B, to.x, to.y)); }
+    }
+    alive().forEach((e) => (e.tangled = false));
+    if (moved.length) push({ type: "untangle", moves: moved });
+    // 6. enemy actions: turn, summon, walk
+    const ember = blockedSet(B);
     const freeTiles = () => {
       const out = [];
-      const blocked = blockedSet(B);
       for (let y = 0; y < B.h; y++) for (let x = 0; x < B.w; x++) {
-        if (isRock(B, x, y) || blocked.has(idx(B, x, y)) || enemyAt(B.enemies, x, y)) continue;
-        if (x === B.hero.x && y === B.hero.y) continue;
+        if (!freeFor(B, x, y, null, ember)) continue;
         if (Math.max(Math.abs(x - B.hero.x), Math.abs(y - B.hero.y)) <= 1) continue;
         out.push({ x, y });
       }
       return out;
     };
+    const rotateTo = (e, w) => { if (w && w !== e.weak && validWeaks(B, e).includes(w)) { e.weak = w; push({ type: "rotate", uid: e.uid, weak: w }); } };
     const rotate = (e) => {
       const v = validWeaks(B, e);
       let k = CW.indexOf(e.weak);
       for (let n = 0; n < 4; n++) { k = (k + 1) % 4; if (v.includes(CW[k])) break; }
-      e.weak = CW[k];
-      push({ type: "rotate", uid: e.uid, weak: e.weak });
+      rotateTo(e, CW[k]);
     };
     const summon = (type) => {
       const f = freeTiles();
@@ -604,7 +800,45 @@
       B.enemies.push(e);
       push({ type: "summon", enemy: Object.assign({}, e) });
     };
-    for (const e of alive().slice()) {
+    const faceHero = (e) => {
+      // walkers show their back: the weak side points away from the hero
+      const dx = B.hero.x - e.x, dy = B.hero.y - e.y;
+      rotateTo(e, Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? "L" : "R") : dy > 0 ? "U" : "D");
+    };
+    const step4 = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    const walkTo = (e, to) => { push({ type: "move", uid: e.uid, from: { x: e.x, y: e.y }, to }); e.x = to.x; e.y = to.y; };
+    const chase = (e) => {
+      if (cheb(e, B.hero) <= 1) return;
+      // BFS (4-dir) toward any tile next to the hero
+      const start = idx(B, e.x, e.y), prev = new Map([[start, -1]]), q = [[e.x, e.y]];
+      let goal = null;
+      while (q.length && !goal) {
+        const [x, y] = q.shift();
+        for (const [dx, dy] of step4) {
+          const nx = x + dx, ny = y + dy, k = idx(B, nx, ny);
+          if (!inB(B, nx, ny) || prev.has(k) || !freeFor(B, nx, ny, e, ember)) continue;
+          prev.set(k, idx(B, x, y));
+          if (cheb({ x: nx, y: ny }, B.hero) <= 1) { goal = k; break; }
+          q.push([nx, ny]);
+        }
+      }
+      if (goal == null) return;
+      let k = goal;
+      while (prev.get(k) !== start) k = prev.get(k);
+      walkTo(e, { x: k % B.w, y: Math.floor(k / B.w) });
+      faceHero(e);
+    };
+    const flee = (e) => {
+      let best = null, bd = cheb(e, B.hero);
+      for (const [dx, dy] of step4) {
+        const t = { x: e.x + dx, y: e.y + dy };
+        if (!inB(B, t.x, t.y) || !freeFor(B, t.x, t.y, e, ember)) continue;
+        const dd = cheb(t, B.hero);
+        if (dd > bd) { bd = dd; best = t; }
+      }
+      if (best) walkTo(e, best);
+    };
+    for (const e of alive().slice().sort((a, b) => cheb(a, B.hero) - cheb(b, B.hero))) {
       const d = D.ENEMIES[e.type];
       if (d.rotates) rotate(e);
       if (d.summons && alive().length < 7) summon("husk");
@@ -614,14 +848,18 @@
         if (B.phase2) { if (minions < 2) summon("husk"); if (minions < 3) summon("wisp"); }
         else if (minions < 2) summon("husk");
       }
+      if (d.ai === "chase" || (d.ai === "slow" && B.turn % 2 === 0)) chase(e);
+      else if (d.ai === "flee") flee(e);
     }
-    // 5. next turn
+    // 7. next turn: new announcements
     B.turn++;
+    planTelegraphs(B);
+    push({ type: "teles" });
     push({ type: "turn", turn: B.turn });
     return events;
   }
 
-  /* ---------- rewards ---------- */
+  /* ---------- objectives: an action and its reward, shown up front ---------- */
   function drawRelic(run, rng, rareChance, exclude) {
     const pool = Object.keys(D.RELICS).filter((id) => !run.relics.includes(id) && !exclude.includes(id));
     if (!pool.length) return null;
@@ -629,6 +867,50 @@
     if ((rng() < rareChance && rares.length) || !commons.length) return rpick(rng, rares);
     return rpick(rng, commons);
   }
+  function genObjectives(run, B) {
+    const rng = run.rng;
+    const teleCount = B.enemies.filter((e) => D.ENEMIES[e.type].tele).length;
+    const pool = shuffle(rng, Object.keys(D.OBJECTIVES)).filter((id) => !(id === "friendly" && teleCount < 2) && !(id === "multi" && B.enemies.length < 3) && !(id === "fast2" && B.isBoss));
+    const used = [];
+    return pool.slice(0, 2).map((id, k) => {
+      let reward = null;
+      const slots = BAL.maxCompanions - run.companions.length;
+      const comps = Object.keys(D.COMPANIONS).filter((c) => !run.companions.includes(c) && !used.includes(c));
+      if (k === 0 && slots > 0 && comps.length && rng() < 0.5) reward = { kind: "comp", id: rpick(rng, comps) };
+      if (!reward) { const r = drawRelic(run, rng, B.kind === "elite" ? 0.6 : 0.3, used); if (r) reward = { kind: "relic", id: r }; }
+      if (!reward) reward = { kind: "maxhp", amount: 5 };
+      if (reward.id) used.push(reward.id);
+      return { id, reward };
+    });
+  }
+  /* 'done' | 'failed' | 'open' — final=true at victory */
+  function objectiveState(B, o, final) {
+    const s = B.bst;
+    switch (o.id) {
+      case "chain3": return s.chain >= 3 ? "done" : "open";
+      case "multi": return s.multi >= 2 ? "done" : "open";
+      case "weak3": return s.weak >= 3 ? "done" : "open";
+      case "bump3": return s.bumps >= 3 ? "done" : "open";
+      case "friendly": return s.friendly >= 1 ? "done" : "open";
+      case "noguard": return s.guardHits > 0 ? "failed" : final ? "done" : "open";
+      case "fast2": return B.turn > 2 ? "failed" : final ? "done" : "open";
+    }
+    return "open";
+  }
+  function claimObjectives(run, B) {
+    const got = [];
+    for (const o of B.objectives) {
+      if (objectiveState(B, o, true) !== "done") continue;
+      const r = o.reward;
+      if (r.kind === "maxhp") { run.maxHp += r.amount; run.hp += r.amount; }
+      else if (r.kind === "comp" && run.companions.length >= BAL.maxCompanions) continue;
+      else applyReward(run, r);
+      got.push(o);
+    }
+    return got;
+  }
+
+  /* ---------- rewards ---------- */
   function genRewards(run, kind) {
     const rng = run.rng;
     const out = [];
@@ -650,8 +932,9 @@
     return out;
   }
   function applyReward(run, r) {
-    if (r.kind === "comp") { if (run.companions.length < BAL.maxCompanions) run.companions.push(r.id); }
+    if (r.kind === "comp") { if (run.companions.length < BAL.maxCompanions && !run.companions.includes(r.id)) run.companions.push(r.id); }
     else if (r.kind === "relic") {
+      if (run.relics.includes(r.id)) return;
       run.relics.push(r.id);
       if (r.id === "pact") { run.maxHp = Math.max(10, run.maxHp - 8); run.hp = Math.min(run.hp, run.maxHp); }
     }
@@ -678,7 +961,6 @@
     }
     return out;
   }
-  /* tile from which a straight-in attack hits the weak side (null if sealed/blocked) */
   function weakEntries(B, enemies, e) {
     const [dx, dy] = CARD[e.weak];
     const out = [];
@@ -697,7 +979,6 @@
     const blocked = blockedSet(B, [B.hero]);
     return DIRS8.some(([dx, dy]) => !stepError(B, blocked, 1, B.hero, { x: B.hero.x + dx, y: B.hero.y + dy }));
   }
-  /* boxed in by embers: the oldest embers crumble until a step opens up */
   function unstick(B) {
     const cooled = [];
     while (B.trail.length > 1 && !canMove(B)) cooled.push(B.trail.shift());
@@ -717,8 +998,10 @@
 
   EL.Logic = {
     CARD, CW, DIRS8, rngFrom, createRun, stats, genMap, nextNodes, genBattle,
-    blockedSet, stepError, isWeakEntry, sealedBy, enemyAt, covers, isRock, idx, inB,
+    blockedSet, stepError, isWeakEntry, sealedBy, enemyAt, enemiesAt, covers, isRock, idx, inB,
     simulate, commitRoute, enemyPhase, genRewards, applyReward, heal, reachable, weakEntries,
     condReq, condProgress, pressureOf, enemyPressure, has, coolCount, canMove, unstick,
+    inGuard, guardTiles, teleTiles, teleDmgAt, planTelegraphs, pushDist,
+    objectiveState, claimObjectives,
   };
 })(window.EL);

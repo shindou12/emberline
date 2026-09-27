@@ -38,6 +38,7 @@
     v.relicHUD = hudLayer.add(new V.RelicHUD());
     v.moveHUD = hudLayer.add(new V.MoveHUD());
     v.pressureHUD = hudLayer.add(new V.PressureHUD());
+    v.objHUD = hudLayer.add(new V.ObjectiveHUD());
     v.companionHUD = hudLayer.add(new V.CompanionHUD());
     v.hint = hudLayer.add(new V.HintView());
     v.pauseBtn = hudLayer.add(new V.IconButton("pause", "i_pause"));

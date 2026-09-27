@@ -37,6 +37,7 @@
         if (d.id === "pause") { if (["Map", "Battle.Idle", "Battle.Planned"].includes(this.state)) this.openPause(); return; }
         if (d.id === "relic") { this.toastRelic(d.relic); return; }
         if (d.id === "comp") { const c = evt.source.comp; if (c) this.toastComp(c); return; }
+        if (d.id === "objective") { this.toastObjective(d.index); return; }
       }
       const s = STATES[this.state];
       if (s && s.on) s.on.call(this, evt);
@@ -66,6 +67,7 @@
       const battle = mode === "battle", map = mode === "map";
       v.hudLayer.visible = battle || map;
       v.moveHUD.visible = v.pressureHUD.visible = battle;
+      v.objHUD.visible = battle;
       v.companionHUD.visible = battle;
       v.pauseBtn.visible = battle || map;
       v.turnHUD.showTurn = battle;
@@ -102,7 +104,7 @@
         if (c.comp) c.need = L.condProgress(run, c.comp, this.emptyT()).need;
       });
     }
-    emptyT() { return { dirs: [], kills: 0, dmgTaken: 0, weakHits: 0, route: [{ x: 0, y: 0 }], marks: {}, uses: {} }; }
+    emptyT() { return { dirs: [], kills: 0, dmgTaken: 0, weakHits: 0, tangles: 0, guardEntered: 0, route: [{ x: 0, y: 0 }], marks: {}, uses: {} }; }
     floorText() {
       if (!this.run.nodeId) return "入口";
       const n = this.run.map.nodes[this.run.nodeId];
@@ -174,7 +176,50 @@
       v.fx.ps = []; v.fx.prims = [];
       v.combo.chain = 0; v.combo.alpha = 0;
       v.turnHUD.turn = B.turn; v.turnHUD.floor = this.floorText();
+      v.objHUD.setObjectives(B.objectives);
+      this.refreshBoardMarks();
       this.coolPreview();
+    }
+    /* guard zones + announced strikes for a given enemy state (default: the battle's truth) */
+    refreshBoardMarks(enemies, heroEnd) {
+      const B = this.B, bd = this.v.board;
+      enemies = enemies || B.enemies;
+      bd.teles = [];
+      for (const e of enemies) if (e.alive) for (const t of L.teleTiles(B, e)) bd.teles.push({ x: t.x, y: t.y, dmg: e.tele.dmg, uid: e.uid });
+      bd.guards = L.guardTiles(B, enemies);
+      bd.heroEnd = heroEnd || B.hero;
+    }
+    /* enemies sharing a tile (a tangle) fan out a little so each stays readable */
+    layoutStacks() {
+      const groups = {};
+      for (const k in this.enemyViews) {
+        const ev = this.enemyViews[k];
+        if (ev.dead) continue;
+        const key = Math.round(ev.tx) + "," + Math.round(ev.ty);
+        (groups[key] = groups[key] || []).push(ev);
+      }
+      for (const key in groups) {
+        const g = groups[key], n = g.length;
+        g.forEach((ev, i) => {
+          const sox = n > 1 ? (i - (n - 1) / 2) * 12 : 0, soy = n > 1 ? -i * 4 : 0;
+          EL.tween(ev, { sox, soy }, 180, { clock: "ui", ease: U.ease.outBack });
+        });
+      }
+    }
+    objectiveStates() { return this.B.objectives.map((o) => L.objectiveState(this.B, o, false)); }
+    rewardName(r) {
+      if (r.kind === "relic") return D.RELICS[r.id].name;
+      if (r.kind === "comp") return D.COMPANIONS[r.id].name + "（仲間）";
+      return "最大HP+" + r.amount;
+    }
+    toastObjective(i) {
+      if (!this.B || !this.B.objectives[i]) return;
+      const o = this.B.objectives[i], info = D.OBJECTIVES[o.id], r = o.reward;
+      const st = L.objectiveState(this.B, o, false);
+      const tail = st === "done" ? "（達成済み）" : st === "failed" ? "（失敗）" : "";
+      const rdesc = r.kind === "relic" ? D.RELICS[r.id].desc : r.kind === "comp" ? D.COMPANIONS[r.id].skill + "：" + D.COMPANIONS[r.id].skillText : "最大HPが上がる";
+      this.toast(`目標：${info.label}${tail}`, `${info.desc}\n報酬：${this.rewardName(r)}\n${rdesc}`, r.kind === "relic" ? D.RELICS[r.id].icon : null);
+      S.play("hover");
     }
     addEnemyView(e) {
       const ev = this.v.enemies.add(new V.EnemyView(e));
@@ -191,7 +236,10 @@
         ev.weak = e.weak; ev.hp = e.hp; ev.phase2 = e.boss && B.phase2;
         ev.pressure = L.enemyPressure(this.run, B, e);
         ev.flip = e.weak === "L";
+        ev.tangled = !!e.tangled;
+        ev.tx = e.x; ev.ty = e.y;
       }
+      this.layoutStacks();
     }
     /* tiles that will cool at the end of this turn if no more are added */
     coolPreview(extra) {
@@ -201,7 +249,7 @@
     clearTargets() {
       for (const k in this.enemyViews) {
         const ev = this.enemyViews[k];
-        ev.target = false; ev.kill = false; ev.dmg = null; ev.counter = null; ev.blocked = false; ev.dmgWeak = false;
+        ev.target = false; ev.kill = false; ev.dmg = null; ev.guardDmg = null; ev.blocked = false; ev.dmgWeak = false;
       }
     }
     resetTurnHud() {
@@ -209,6 +257,7 @@
       const S0 = L.stats(run);
       v.moveHUD.moves = S0.mov; v.moveHUD.max = S0.mov; v.moveHUD.prev = null;
       v.pressureHUD.value = L.pressureOf(run, B, B.enemies); v.pressureHUD.prev = null;
+      v.pressureHUD.tele = L.teleDmgAt(B, B.enemies, B.hero.x, B.hero.y); v.pressureHUD.telePrev = null;
       v.playerHUD.hp = run.hp; v.playerHUD.maxHp = run.maxHp; v.playerHUD.prev = null;
       v.companionHUD.cards.forEach((c) => {
         c.ready = false; c.used = 0; c.near = false;
@@ -279,17 +328,22 @@
         if (dmg > 0 || !p.alive) { ev.target = true; ev.dmg = dmg; ev.kill = !p.alive; ev.refund = !p.alive ? L.stats(run).refund : 0; }
         if (!p.alive) kills++;
       }
-      rt.skillMarks = []; rt.areas = [];
+      rt.skillMarks = []; rt.areas = []; rt.pushes = []; rt.guardHits = [];
+      let guardDmg = 0;
       for (const st of res.steps) {
-        if (st.attack) {
+        for (const at of st.attacks) {
           attacks++;
-          const ev = this.enemyViews[st.attack.uid];
-          if (ev) {
-            ev.dmgWeak = ev.dmgWeak || st.attack.weak;
-            if (st.attack.counter) ev.counter = (ev.counter || 0) + st.attack.counter;
-            if (st.attack.blocked) ev.blocked = true;
-          }
+          const ev = this.enemyViews[at.uid];
+          if (ev) ev.dmgWeak = ev.dmgWeak || at.weak;
         }
+        for (const g of st.guards) {
+          const ev = this.enemyViews[g.uid];
+          if (g.blocked) { if (ev) ev.blocked = true; rt.guardHits.push({ x: st.tile.x, y: st.tile.y, blocked: true }); continue; }
+          guardDmg += g.dmg;
+          if (ev) ev.guardDmg = (ev.guardDmg || 0) + g.dmg;
+          rt.guardHits.push({ x: st.tile.x, y: st.tile.y, dmg: g.dmg });
+        }
+        for (const pu of st.pushes) rt.pushes.push(pu);
         for (const sk of st.skills) {
           skills++;
           rt.skillMarks.push({ x: st.tile.x, y: st.tile.y, comp: sk.comp, color: D.COMPANIONS[sk.comp].color, k: skills });
@@ -302,6 +356,9 @@
       v.moveHUD.prev = res.T.moves;
       v.playerHUD.prev = res.T.hp !== run.hp ? res.T.hp : null;
       v.pressureHUD.prev = L.pressureOf(run, B, res.st.enemies);
+      v.pressureHUD.telePrev = res.teleEnd;
+      rt.teleEnd = res.teleEnd;
+      this.refreshBoardMarks(res.st.enemies, res.end);
       v.companionHUD.cards.forEach((c) => {
         if (!c.comp) return;
         const pr = L.condProgress(run, c.comp, res.T);
@@ -335,6 +392,9 @@
       if (res.outcome === "dead") this.hint("このルートでは倒れる！");
       else if (res.endBlocked) this.hint("敵のマスでは止まれない");
       else if (res.outcome === "victory") this.hint("このルートで全滅できる！");
+      else if (res.teleEnd > 0) this.hint(`終点に攻撃予告！ −${res.teleEnd}`);
+      else if (res.T.tangles > 0 && !kills) this.hint("もつれた！ 斬れば全員に弱点ダメージ");
+      else if (guardDmg > 0 && res.steps.length <= 3) this.hint(`警戒エリア −${guardDmg} — 弱点側から回り込め`);
       else if (skills) this.hint("仲間の能力が発動する！");
       else if (kills) this.hint(`撃破で移動+${L.stats(run).refund} — まだ伸ばせる`);
       else if (this.route.length > 1) this.hint("指を離して、出撃ボタンで実行");
@@ -343,12 +403,14 @@
     enemyTile(uid) { const e = this.B.enemies.find((x) => x.uid === uid); return e ? { x: e.x, y: e.y } : { x: 0, y: 0 }; }
     setDragUI(on) {
       const v = this.v;
-      EL.tween(v.board, { dim: on ? 1 : 0, entryEmph: on ? 1 : 0 }, 180, { clock: "ui" });
+      EL.tween(v.board, { dim: on ? 1 : 0, entryEmph: on ? 1 : 0, guardEmph: on ? 1 : 0 }, 180, { clock: "ui" });
       for (const k in this.enemyViews) EL.tween(this.enemyViews[k], { emph: on ? 1 : 0 }, 180, { clock: "ui" });
       if (!on) {
         v.board.entries = []; v.board.reach = null;
-        v.moveHUD.prev = null; v.pressureHUD.prev = null; v.playerHUD.prev = null;
+        v.moveHUD.prev = null; v.pressureHUD.prev = null; v.pressureHUD.telePrev = null; v.playerHUD.prev = null;
+        v.route.pushes = []; v.route.guardHits = []; v.route.teleEnd = 0;
         this.clearTargets();
+        if (this.B) this.refreshBoardMarks();
       }
     }
 
@@ -357,6 +419,8 @@
       const B = this.B, run = this.run, v = this.v;
       const res = L.simulate(B, run, route);
       v.route.pts = route.slice(0, res.last + 1); v.route.consumed = 0; v.route.skillMarks = []; v.route.areas = [];
+      v.route.pushes = []; v.route.guardHits = []; v.route.teleEnd = 0;
+      v.board.teles = []; v.board.guards = [];
       this.clearTargets();
       v.companionHUD.cards.forEach((c) => { c.ready = false; c.near = false; });
       this.chain = 0;
@@ -436,18 +500,21 @@
       }
       await EL.wait(ev.weak ? 110 : 70);
     }
-    async ev_counter(ev) {
+    async ev_guard(ev) {
       const v = this.v, evw = this.enemyViews[ev.uid];
       if (evw) {
-        const dx = U.sign(v.hero.x - (evw.rect().x + 24)), dy = U.sign(v.hero.y - 18 - (evw.rect().y + 24));
+        const r = evw.rect();
+        const dx = U.sign(v.hero.x - (r.x + r.s / 2)), dy = U.sign(v.hero.y - 18 - (r.y + r.s / 2));
         evw.ox = dx * 12; evw.oy = dy * 12;
         EL.tween(evw, { ox: 0, oy: 0 }, 200, { ease: U.ease.outQuad });
+        v.fx.beam(r.x + r.s / 2, r.y + r.s / 2, v.hero.x, v.hero.y - 16, "#ff6a9a", 200);
       }
       await EL.wait(60);
       const h = v.hero;
       h.red = 1; EL.tween(h, { red: 0 }, 260);
       h.ox = -6; EL.tween(h, { ox: 0 }, 220, { ease: U.ease.outElastic });
       v.floats.spawn("-" + ev.dmg, h.x, h.y - 50, { s: 3, color: "#ff4d5e", life: 800 });
+      v.floats.spawn("警戒", h.x, h.y - 76, { kind: "jp", color: "#ffb0c8", life: 700, vy: -30 });
       v.fx.burst(h.x, h.y - 16, 14, { speed: [60, 200], life: [200, 420], palette: ["#ff4d5e", "#ff8f9b", "#8f2231"], size: 2, glow: true });
       v.postfx.flashLight(h.x, h.y - 16, 120, "255,70,90", 0.9, 300);
       v.playerHUD.hp = ev.hp; v.playerHUD.shake = 3; v.playerHUD.flash = 0.6;
@@ -457,20 +524,64 @@
       EL.hitstop(70);
       this.cam.shake(5, 200);
       await EL.wait(150);
+      this.refreshObjectives();
     }
-    async ev_counterBlocked(ev) {
+    async ev_guardBlocked(ev) {
       const v = this.v, h = v.hero;
       h.shield = 1; EL.tween(h, { shield: 0 }, 380);
-      v.floats.spawn("BLOCK", h.x, h.y - 52, { s: 2, color: C.move, life: 700 });
+      v.floats.spawn(ev.reason === "aegis" ? "すり抜け" : "BLOCK", h.x, h.y - 52, ev.reason === "aegis" ? { kind: "jp", color: C.move, life: 700 } : { s: 2, color: C.move, life: 700 });
       S.play("block");
       await EL.wait(110);
+    }
+    /* a survivor slides along the line of travel */
+    async ev_push(ev) {
+      const v = this.v, evw = this.enemyViews[ev.uid];
+      if (!evw) return;
+      if (!ev.path.length) { evw.ox = ev.dir[0] * 6; evw.oy = ev.dir[1] * 6; EL.tween(evw, { ox: 0, oy: 0 }, 160, { ease: U.ease.outBack }); await EL.wait(60); return; }
+      S.play("whoosh");
+      for (const t of ev.path) {
+        const r = evw.rect();
+        v.fx.burst(r.x + r.s / 2, r.y + r.s - 6, 6, { speed: [20, 70], life: [200, 420], palette: ["#8a7f86", "#5c5058", "#c9b3a0"], size: 2, angle: Math.atan2(-ev.dir[1], -ev.dir[0]), spread: 1.2 });
+        await EL.tween(evw, { tx: t.x, ty: t.y }, 70, { ease: U.ease.outQuad });
+      }
+      this.layoutStacks();
+    }
+    async ev_bump(ev) {
+      const v = this.v, evw = this.enemyViews[ev.uid];
+      if (!evw) return;
+      const r = evw.rect();
+      const cx = r.x + r.s / 2, cy = r.y + r.s / 2;
+      evw.flash = 1; EL.tween(evw, { flash: 0 }, 200);
+      evw.hp = ev.hp;
+      v.fx.ring(cx, cy, 26, "#ffd35a", 260, 3);
+      v.fx.burst(cx, cy, 16, { speed: [60, 200], life: [200, 420], palette: ["#fff6df", "#ffd35a", "#ffb020"], sizes: [2, 4], glow: true });
+      v.postfx.flashLight(cx, cy, 110, "255,210,120", 0.8, 240);
+      v.floats.spawn(ev.dmg, cx + 10, cy - 26, { s: 3, color: "#ffd35a", life: 700 });
+      const word = { wall: "ドン！", ember: "ジュッ！", tangle: "ゴツン！", full: "ゴツン！", boss: "ゴツン！" }[ev.reason] || "";
+      if (word) v.floats.spawn(word, cx - 6, cy - 50, { kind: "jp", color: C.cream, life: 600, vy: -30 });
+      S.play("slash"); S.play("rotate");
+      EL.hitstop(60);
+      this.cam.shake(4, 160);
+      await EL.wait(90);
+    }
+    async ev_tangle(ev) {
+      const v = this.v;
+      for (const uid of ev.uids) { const w = this.enemyViews[uid]; if (w) w.tangled = true; }
+      this.layoutStacks();
+      const c = tc(ev.x, ev.y);
+      v.fx.ring(c.x, c.y, 34, "#b08cff", 360, 4);
+      v.floats.spawn("もつれ！", c.x, c.y - 44, { kind: "jp", color: "#e9dcff", life: 900, vy: -30 });
+      if (ev.gain) { v.floats.spawn("+" + ev.gain + " MOVE", c.x, c.y + 20, { s: 2, color: C.heal, life: 900, vy: -24 }); this.flyOrb(c.x, c.y, ev.moves); v.moveHUD.moves = ev.moves; }
+      S.play("chime");
+      await EL.wait(160);
+      this.refreshObjectives();
     }
     async ev_kill(ev) {
       const v = this.v, evw = this.enemyViews[ev.uid];
       if (!evw) return;
       const r = evw.rect();
       const cx = r.x + r.s / 2, bottom = r.y + r.s - 6;
-      const scorch = ev.src === "scorch";
+      const scorch = ev.src === "scorch" || ev.src === "friendly";
       if (!scorch) { this.chain = ev.chain; v.combo.chain = ev.chain; v.combo.t = 0; v.combo.alpha = 1; EL.tweens.kill(v.combo); }
       evw.flash = 1;
       await EL.wait(40);
@@ -730,6 +841,7 @@
             h.ox = -8; EL.tween(h, { ox: 0 }, 300, { ease: U.ease.outElastic });
             if (ev.total > 0) v.floats.spawn("-" + ev.total, h.x, h.y - 56, { s: 4, color: "#ff4d5e", grad: "#ffb0b8", life: 1100 });
             if (ev.reduced) v.floats.spawn("余熱 -" + ev.reduced, h.x, h.y - 88, { kind: "jp", color: C.emberL, life: 1100, vy: -30 });
+            if (ev.src === "strike") v.floats.spawn("直撃", h.x, h.y - 88, { kind: "jp", color: "#ffb020", life: 1000, vy: -30 });
             v.fx.burst(h.x, h.y - 16, 28, { speed: [60, 220], life: [200, 550], palette: ["#b08cff", "#ff4d5e", "#5c34b0"], size: 2, glow: true });
             v.postfx.flashLight(h.x, h.y - 16, 170, "180,110,255", 1, 500);
             v.playerHUD.hp = ev.hp; v.playerHUD.shake = 4; v.playerHUD.flash = 0.7;
@@ -763,6 +875,57 @@
             EL.tween(evw, { alpha: 1, oy: 0 }, 360, { ease: U.ease.outBack });
             S.play("summon");
             await EL.wait(280);
+            break;
+          }
+          case "strike": {
+            const evw = this.enemyViews[ev.uid];
+            v.board.teles = v.board.teles.filter((t) => t.uid !== ev.uid);
+            if (evw) {
+              const r = evw.rect();
+              evw.oy = -10; EL.tween(evw, { oy: 0 }, 260, { ease: U.ease.outBack });
+              evw.flash = 1; EL.tween(evw, { flash: 0 }, 200);
+              v.postfx.flashLight(r.x + r.s / 2, r.y + r.s / 2, 110, "255,90,60", 0.8, 300);
+            }
+            for (const t of ev.tiles) {
+              const c = tc(t.x, t.y);
+              v.fx.tileFlash(t.x, t.y, "rgba(255,70,40,0.6)", 320);
+              v.fx.burst(c.x, c.y, 8, { speed: [40, 140], life: [200, 420], palette: ["#ff5a3a", "#ffb020", "#fff6df"], size: 2, glow: true });
+            }
+            S.play("fire"); this.cam.shake(4, 180);
+            await EL.wait(240);
+            break;
+          }
+          case "friendly": {
+            const evw = this.enemyViews[ev.uid];
+            if (!evw) break;
+            const r = evw.rect();
+            evw.hp = ev.hp; evw.flash = 1; EL.tween(evw, { flash: 0 }, 200);
+            v.floats.spawn(ev.dmg, r.x + r.s / 2, r.y - 4, { s: 3, color: "#ffb020" });
+            v.floats.spawn("同士討ち", r.x + r.s / 2, r.y - 30, { kind: "jp", color: C.emberL, life: 800, vy: -30 });
+            S.play("slash"); EL.hitstop(60);
+            await EL.wait(160);
+            break;
+          }
+          case "untangle": {
+            const tw = [];
+            for (const m of ev.moves) { const w = this.enemyViews[m.uid]; if (w) tw.push(EL.tween(w, { tx: m.to.x, ty: m.to.y }, 220, { ease: U.ease.outQuad })); }
+            for (const k in this.enemyViews) this.enemyViews[k].tangled = false;
+            await Promise.all(tw);
+            this.layoutStacks();
+            break;
+          }
+          case "move": {
+            const w = this.enemyViews[ev.uid];
+            if (!w) break;
+            w.oy = -4;
+            S.play("foot", 1);
+            await Promise.all([EL.tween(w, { tx: ev.to.x, ty: ev.to.y }, 200, { ease: U.ease.inOutSine }), EL.tween(w, { oy: 0 }, 200)]);
+            break;
+          }
+          case "teles": {
+            this.refreshEnemyStatics();
+            this.refreshBoardMarks();
+            if (v.board.teles.length) S.play("lock");
             break;
           }
           case "turn": {
@@ -977,7 +1140,8 @@
               const info = D.ENEMIES[e.type];
               const wk = { U: "上", D: "下", L: "左", R: "右" }[e.weak];
               const sealed = L.sealedBy(B.enemies, e);
-              this.toast(`${info.name}　HP${e.hp}/${e.maxHp}`, `反撃${e.atk}・圧${e.pressure}・弱点：${sealed ? "封印中" : wk + "側"}\n${info.desc}`);
+              const tele = e.tele && !e.tangled ? `・予告${e.tele.dmg}` : "";
+              this.toast(`${info.name}　HP${e.hp}/${e.maxHp}`, `警戒${e.atk}${tele}・圧${e.pressure}・弱点：${sealed ? "封印中" : wk + "側"}${e.tangled ? "・もつれ中" : ""}\n${info.desc}`);
             } else if (d.tile) {
               this.hint("主人公（光っているマス）からなぞって始める");
             }
@@ -1082,6 +1246,14 @@
         run.stats.battles++;
         await this.banner(B.isBoss ? "CONQUERED" : "VICTORY", B.isBoss ? "灰冠の王を討ち果たした" : `撃破！ ${B.turn}ターンで制圧`, C.gold, 900);
         if (!B.isBoss) {
+          const got = L.claimObjectives(run, B);
+          this.refreshObjectives();
+          for (const o of got) {
+            S.play("relic");
+            this.refreshRunHud();
+            if (o.reward.kind === "relic") { v.relicHUD.fresh = o.reward.id; setTimeout(() => (v.relicHUD.fresh = null), 1500); }
+            await this.banner("BONUS", `${D.OBJECTIVES[o.id].label} 達成 — ${this.rewardName(o.reward)}`, C.emberL, 900);
+          }
           const healed = L.heal(run, D.BAL.healAfterBattle);
           if (healed) { v.floats.spawn("+" + healed, v.hero.x, v.hero.y - 50, { s: 3, color: C.heal }); v.playerHUD.hp = run.hp; S.play("heal"); await EL.wait(500); }
         }
@@ -1278,7 +1450,7 @@
   /* tiles behind the hero along the walked path, skipping tiles held by live enemies */
   Mediator.prototype.companionSpots = function (head, settled) {
     const out = [];
-    const occupied = (t) => this.B.enemies.some((e) => e.alive !== false && !(this.deadSet && this.deadSet.has(e.uid)) && L.covers(e, t.x, t.y));
+    const occupied = (t) => Object.values(this.enemyViews).some((ev) => !ev.dead && !(this.deadSet && this.deadSet.has(ev.uid)) && t.x >= Math.round(ev.tx) && t.y >= Math.round(ev.ty) && t.x < Math.round(ev.tx) + ev.size && t.y < Math.round(ev.ty) + ev.size);
     for (let k = this.path.length - 2; k >= 0 && out.length < this.compViews.length; k--) {
       const t = this.path[k];
       if (sameTile(t, head) || occupied(t)) continue;
@@ -1295,6 +1467,11 @@
     v.playerHUD.hp = run.hp;
     v.pressureHUD.value = L.pressureOf(run, B, B.enemies);
     this.path = B.trail.map((t) => ({ x: t.x, y: t.y }));
+    this.refreshBoardMarks();
+    this.refreshObjectives();
+  };
+  Mediator.prototype.refreshObjectives = function () {
+    if (this.B) this.v.objHUD.setStates(this.objectiveStates());
   };
   Mediator.prototype.syncAfterEnemy = function () {
     const v = this.v, B = this.B;
@@ -1306,6 +1483,8 @@
     // no free trail tile left behind the hero: huddle next to the last free spot (never on an enemy)
     this.compViews.forEach((u, i) => this.unitTo(u, spots[i] || spots[spots.length - 1] || B.hero, 200));
     this.refreshEnemyStatics();
+    this.refreshBoardMarks();
+    this.refreshObjectives();
     this.coolPreview();
   };
   Mediator.prototype.fillResult = function (win) {
