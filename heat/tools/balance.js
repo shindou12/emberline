@@ -40,7 +40,7 @@ function score(res, B, run, prof) {
   if (end.heat >= 100) return -5e5;
   const alive = res.st.enemies.filter((e) => e.alive);
   const pressure = L.pressureOf(run, B, alive);
-  const fury = L.furyOf(100 - end.after);
+  const fury = (L.atkMul(100 - end.after) - 1) * 3; // how much the heat will multiply next turn's damage
   // positional sense: stay within reach of an enemy (never idle far away)
   let near = 99;
   for (const e of alive) near = Math.min(near, Math.max(Math.abs(e.x - res.end.x), Math.abs(e.y - res.end.y)));
@@ -106,7 +106,7 @@ function battle(run, node) {
     let res;
     if (route) {
       res = L.simulate(B, run, route);
-      G.routes++; G.steps += res.last; G.fires += res.T.fired.length; if (L.furyOf(run.hp)) G.fury++;
+      G.routes++; G.steps += res.last; G.fires += res.T.fired.length; if (L.heatOf(run.hp) >= 40) G.fury++;
       L.commitRoute(B, run, route, res);
     } else { B.lastT = { moves: 0 }; res = { outcome: "ok" }; }
     if (res.outcome === "victory") { G.battles++; if (turn === 1) G.t1++; return claim(run, B, turn); }
@@ -146,9 +146,9 @@ function playRun(heroId, seed) {
     } else if (n.type === "treasure") {
       const rw = L.genRewards(run, "treasure"); if (rw[0]) L.applyReward(run, rw[0]);
     } else if (n.type === "rest") {
-      if (L.heatOf(run.hp) > 30) L.heal(run, D.BAL.restCool); else run.bonusAtk++;
+      if (L.heatOf(run.hp) > 30) L.coolPct(run, D.BAL.restCool); else run.bonusAtk++;
     } else if (n.type === "event") {
-      L.heal(run, 25);
+      L.coolPct(run, 0.3);
     }
     if (n.row != null && n.type !== "boss") log.hpByRow[n.row] = run.hp / run.maxHp;
   }

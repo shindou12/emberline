@@ -11,16 +11,17 @@
     refundDecay: 1, // kills after the first in a route refund this much less // moves regained for creating a tangle
     coolMin: 2, // embers always cool at least this many tiles per turn
     sealRange: 2, // ward pillar: enemies within this many tiles lose their weak side
-    healAfterBattle: 10, // Kai's trait only: heat vented after each won battle
-    restCool: 60, // the campfire's rest
+    /* every cooling is a share of the heat you have now */
+    healAfterBattle: 0.2, // Kai's trait only: after each won battle
+    restCool: 0.6, // the campfire's rest
     /* heat: 0..100, burnout at 100. Carried between battles. */
     heat: {
-      step: 6, // heat per step (a step alone never burns you out)
       dmgMul: 5, // heat per point of enemy damage (counters, strikes)
       pressPct: 0.08, // each point of night pressure takes this share of the margin left
       cool: 0.2, // after the night, this share of your heat cools off
-      ventBase: 6, ventPct: 0.15, ventLater: 2 / 3, // a kill vents base + share of heat (later kills in a route vent less)
-      fury1: 40, fury2: 65, // attack +1 / +2 at this much heat
+      ventBase: 0, ventPct: 0.2, ventLater: 2 / 3, // a kill vents this share of heat (later kills in a route vent less)
+      atkHeat: 1, // hero damage (blade and skills) ×(1 + atkHeat × heat/100)
+      pressFix: 3, // each point of night pressure adds this much heat (enemy damage is fixed: it can burn you out)
       chargeHeat: 2, // companion charge ×(1 + chargeHeat × heat/100)
     },
     maxCompanions: 3,
@@ -29,19 +30,19 @@
 
   const HEROES = {
     kai: {
-      name: "カイ", title: "燠の剣士", sprite: "kai", hp: 100, atk: 3, mov: 6, bud: [5, 0.4], refund: 2,
-      trait: "燠の手当て", traitText: "戦闘に勝つたび、熱が10下がる。",
+      name: "カイ", title: "燠の剣士", sprite: "kai", hp: 100, atk: 3, mov: 6, stepHeat: [3, 1], refund: 2,
+      trait: "燠の手当て", traitText: "戦闘に勝つたび、熱が20%下がる。",
       style: "バランス型。背後を取って切り抜けろ。", color: "#e8453c",
       stats: { hp: 3, atk: 3, mov: 3 },
     },
     rue: {
-      name: "ルゥ", title: "風の槍兵", sprite: "rue", hp: 100, atk: 3, mov: 7, bud: [6, 0.5], refund: 2,
+      name: "ルゥ", title: "風の槍兵", sprite: "rue", hp: 100, atk: 3, mov: 7, stepHeat: [2, 1], refund: 2,
       trait: "突進", traitText: "攻撃の直前にまっすぐ進んだマス数だけ攻撃+1（最大+3）。",
       style: "連鎖型。長い直線で突き抜け、倒して走り続けろ。", color: "#3fd6c0",
       stats: { hp: 2, atk: 3, mov: 4 },
     },
     gorm: {
-      name: "ゴルム", title: "灰の重騎士", sprite: "gorm", hp: 100, atk: 4, mov: 5, bud: [4, 0.3], refund: 2,
+      name: "ゴルム", title: "灰の重騎士", sprite: "gorm", hp: 100, atk: 4, mov: 5, stepHeat: [4, 2], refund: 2,
       trait: "鉄壁", traitText: "各ターン最初の反撃を無効化する。押し出しが1マス伸びる。",
       style: "重装型。少ない歩数で確実に砕け。", color: "#b8862e",
       stats: { hp: 4, atk: 4, mov: 2 },
@@ -75,7 +76,7 @@
     bram: {
       name: "ブラム", title: "盾の老兵", sprite: "bram", color: "#fff6df",
       cond: { type: "kills", n: 1 }, condText: "撃破", condLong: "敵を1体倒す", charge: [65, 6],
-      skill: "不屈", skillText: "熱−12＋次の反撃を1回無効", effect: "guard", power: 12,
+      skill: "不屈", skillText: "熱を25%下げ、次の反撃を1回無効", effect: "guard", power: 0.25,
     },
     sable: {
       name: "セーブル", title: "影猫", sprite: "sable", color: "#b08cff",
@@ -101,14 +102,14 @@
 
   /* Relics change *how* you draw routes, not just numbers. */
   const RELICS = {
-    boots: { name: "燠の長靴", rarity: 1, icon: "r_boots", desc: "最低歩数+1。" },
+    boots: { name: "燠の長靴", rarity: 1, icon: "r_boots", desc: "最大移動+1。" },
     fang: { name: "狩人の牙", rarity: 1, icon: "r_fang", desc: "撃破時の移動回復+1。" },
     dirk: { name: "背刺しの短剣", rarity: 2, icon: "r_dirk", desc: "ウィークサイド攻撃のダメージ倍率+1。" },
     gauntlet: { name: "鉄の手甲", rarity: 1, icon: "r_gauntlet", desc: "反撃で受けるダメージ−1（熱−4）。" },
     hourglass: { name: "灰の砂時計", rarity: 1, icon: "r_hourglass", desc: "足跡の長さ−3。盤面が広く使える。" },
     banner: { name: "群れの旗", rarity: 2, icon: "r_banner", desc: "仲間1人につき攻撃+1。" },
     heart: { name: "狂戦士の心臓", rarity: 1, icon: "r_heart", desc: "熱が50以上の間、攻撃+2。" },
-    chain: { name: "連鎖の鎖", rarity: 2, icon: "r_chain", desc: "1ターン3体目以降の撃破ごとに移動+1・熱−3。" },
+    chain: { name: "連鎖の鎖", rarity: 2, icon: "r_chain", desc: "1ターン3体目以降の撃破ごとに移動+1・熱−5%。" },
     sigil: { name: "直進の槍印", rarity: 1, icon: "r_sigil", desc: "3マス以上まっすぐ進んだ直後の攻撃+2。" },
     charm: { name: "曲がり角の護符", rarity: 2, icon: "r_charm", desc: "仲間のゲージが30%たまりやすくなる。" },
     twin: { name: "二度咲きの灯", rarity: 2, icon: "r_twin", desc: "満タンになったゲージを、そのターンのうちに使える。" },
@@ -142,14 +143,14 @@
       text: "暗がりで小さな灯が揺れている。\n誰かが、深層で道に迷ったらしい。",
       choices: [
         { label: "連れて行く（仲間を選ぶ）", act: "recruit" },
-        { label: "灯を預ける（熱−25）", act: "heal10" },
+        { label: "灯を預ける（熱−30%）", act: "heal10" },
       ],
     },
     spring: {
       title: "燠泉", icon: "n_event",
       text: "温かな湧き水が岩の間から滲んでいる。\n灰の匂いがしない、珍しい水だ。",
       choices: [
-        { label: "飲む（熱−35）", act: "heal14" },
+        { label: "飲む（熱−45%）", act: "heal14" },
         { label: "浴びる（仲間のゲージ満タン）", act: "maxhp5" },
       ],
     },

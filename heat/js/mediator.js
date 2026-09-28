@@ -287,7 +287,7 @@
     rewardName(r) {
       if (r.kind === "relic") return D.RELICS[r.id].name;
       if (r.kind === "comp") return D.COMPANIONS[r.id].name + "（仲間）";
-      return "熱−" + r.amount;
+      return "熱−" + r.amount + "%";
     }
     toastObjective(i) {
       if (!this.B || !this.B.objectives[i]) return;
@@ -1500,7 +1500,7 @@
         rv.setRewards(this.rewards);
         rv.confirm.disabled = true;
         rv.skip.visible = !arg.noSkip;
-        rv.skip.label = arg.kind === "lost" ? "やめておく" : "見送る（熱−10）";
+        rv.skip.label = arg.kind === "lost" ? "やめておく" : "見送る（熱−10%）";
         this.showOnly(["reward"]);
         rv.alpha = 0;
         EL.tween(rv, { alpha: 1 }, 200, { clock: "ui" });
@@ -1528,7 +1528,7 @@
           this.wipe(async () => { this.go("Map"); this.toast(txt, r.kind === "comp" ? "足跡が長く残るようになった" : D.RELICS[r.id].desc, r.kind === "relic" ? D.RELICS[r.id].icon : null); });
         }
         if (d.id === "reward.skip") {
-          if (this.rewardArg.kind !== "lost") L.heal(run, 10);
+          if (this.rewardArg.kind !== "lost") L.coolPct(run, 0.1);
           S.play("cancel");
           this.wipe(async () => this.go("Map"));
         }
@@ -1545,7 +1545,7 @@
     Rest: {
       enter() {
         const run = this.run, v = this.v;
-        const amt = D.BAL.restCool;
+        const amt = Math.round(D.BAL.restCool * 100) + "%";
         this.choiceActs = ["rest", "train"];
         v.choice.setContent("焚き火", "揺れる火が、深層の冷えを和らげる。\n最後の休息になるかもしれない。", "n_rest", [
           { label: `休む（熱−${amt}）` }, { label: "鍛える（攻撃+1）" },
@@ -1557,7 +1557,7 @@
         if (evt.type !== "ui.click" || evt.data.id !== "choice") return;
         const run = this.run;
         const act = this.choiceActs[evt.data.index];
-        if (act === "rest") { const h = L.heal(run, D.BAL.restCool); S.play("heal"); this.wipe(async () => { this.go("Map"); this.toast("ひと息ついた", `熱が${h}下がった`); }); }
+        if (act === "rest") { const h = L.coolPct(run, D.BAL.restCool); S.play("heal"); this.wipe(async () => { this.go("Map"); this.toast("ひと息ついた", `熱が${h}下がった`); }); }
         if (act === "train") { run.bonusAtk++; S.play("relic"); this.wipe(async () => { this.go("Map"); this.toast("刃を研いだ", "攻撃が1上がった"); }); }
       },
     },
@@ -1596,8 +1596,8 @@
         switch (c.act) {
           case "altar": { run.hp -= 25; const id = grant(true); S.play("relic"); back(id ? D.RELICS[id].name + "を授かった" : "何も起こらなかった", id ? D.RELICS[id].desc : "", id ? D.RELICS[id].icon : null); break; }
           case "recruit": S.play("confirm"); this.go("Reward", { kind: "lost", title: "迷い灯", sub: "誰を連れて行く？" }); break;
-          case "heal10": { const h = L.heal(run, 25); S.play("heal"); back("灯を預けた", `熱が${h}下がった`); break; }
-          case "heal14": { const h = L.heal(run, 35); S.play("heal"); back("燠泉を飲んだ", `熱が${h}下がった`); break; }
+          case "heal10": { const h = L.coolPct(run, 0.3); S.play("heal"); back("灯を預けた", `熱が${h}下がった`); break; }
+          case "heal14": { const h = L.coolPct(run, 0.45); S.play("heal"); back("燠泉を飲んだ", `熱が${h}下がった`); break; }
           case "maxhp5": run.companions.forEach((id) => (run.charge[id] = 100)); S.play("relic"); back("燠泉を浴びた", "仲間のゲージが満タンになった"); break;
           case "cursed": { run.hp -= 20; run.flags.cursed = true; const id = grant(false); S.play("roar"); back(id ? D.RELICS[id].name + "を手に入れた" : "空っぽだった", "次の戦闘に骨砕きが紛れ込む…", id ? D.RELICS[id].icon : null); break; }
           default: S.play("cancel"); back(); break;

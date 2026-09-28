@@ -1199,7 +1199,7 @@
       A.jp(ctx, this.name, 58, 6, { size: 16, color: C.cream });
       const x = 58, y = 30, w = 112, h = 12;
       const heat = Math.max(0, Math.min(100, 100 - this.shown));
-      const col = (hv) => (hv >= HT.fury2 ? "#ff3b4e" : hv >= HT.fury1 ? "#ff6a2a" : "#ffa63a");
+      const col = (hv) => (hv >= 65 ? "#ff3b4e" : hv >= 40 ? "#ff6a2a" : "#ffa63a");
       const px = (hv) => x + Math.round((w * Math.max(0, Math.min(100, hv))) / 100);
       ctx.fillStyle = C.ink; ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
       ctx.fillStyle = "#2a1620"; ctx.fillRect(x, y, w, h);
@@ -1209,7 +1209,7 @@
       ctx.fillStyle = col(heat); ctx.fillRect(x, y, fw, h);
       ctx.fillStyle = "#ffe08a"; ctx.fillRect(x, y, fw, 2);
       ctx.fillStyle = "#8a2410"; ctx.fillRect(x, y + h - 2, fw, 2);
-      if (heat >= HT.fury1) { // a flicker along the top when hot
+      if (heat >= 40) { // a flicker along the top when hot
         ctx.fillStyle = "#fff0b0";
         for (let i = 0; i < 4; i++) { const fx = x + ((this.t / 7 + i * 29) % Math.max(1, fw)); ctx.fillRect(Math.floor(fx), y - 2 - (i % 2) * 2, 2, 2); }
       }
@@ -1227,16 +1227,15 @@
         ctx.fillStyle = this.night >= 100 ? "#ff4d5e" : "#b08cff";
         ctx.fillRect(nx - 1, y - 4, 2, h + 8);
       }
-      for (const [tv, lab] of [[HT.fury1, "+1"], [HT.fury2, "+2"]]) {
-        const tx = px(tv);
-        ctx.fillStyle = C.ink; ctx.fillRect(tx - 1, y, 2, h);
-        A.text(ctx, lab, tx + 3, y + 3, { s: 1, color: heat >= tv ? "#5a1408" : "#6c4a5a" });
-      }
+      for (let k = 1; k < 4; k++) { ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.fillRect(px(k * 25) - 1, y, 2, h); }
       A.spr(ctx, "i_flame", x - 2, y + h + 1, { s: 2, ax: 0.5, ay: 1 });
       const shownHeat = this.prev != null && this.prev !== this.hp ? 100 - this.prev : Math.round(heat);
       const warn = this.prev != null && this.prev < this.hp;
       A.text(ctx, String(Math.max(0, shownHeat)), x + w + 6, y - 1, { s: 2, color: shownHeat >= 100 ? "#ff4d5e" : warn ? "#ffb0a0" : this.prev != null && this.prev > this.hp ? C.move : C.cream });
-      A.jp(ctx, "熱", x + w + 6, y - 20, { size: 12, color: C.dim, ow: 1 });
+      // heat multiplies your damage (and your companions' charge)
+      const mulHeat = this.prev != null ? 100 - this.prev : heat;
+      const mul = 1 + (HT.atkHeat * Math.max(0, Math.min(100, mulHeat))) / 100;
+      A.jp(ctx, "熱　攻×" + mul.toFixed(1), x + w + 6, y - 20, { size: 12, color: mul >= 1.4 ? C.emberL : C.dim, ow: 1 });
     }
   }
   V.PlayerHUD = PlayerHUD;
@@ -1636,15 +1635,16 @@
       A.panel(ctx, 12, 244, 336, 308, { fill: "#1c1530" });
       A.jp(ctx, h.title, 28, 256, { size: 16, color: h.color });
       A.jp(ctx, h.name, 28, 276, { size: 32, color: C.cream });
-      // steps: many while cool, never below the floor however hot
-      const cold = Math.max(h.bud[0], Math.floor((h.bud[1] * 100) / D.BAL.heat.step));
-      const rows = [["攻撃", h.atk, h.stats.atk, C.gold], ["最大歩数", cold, cold - 2, C.move], ["最低歩数", h.bud[0], h.bud[0] - 1, "#5aa8d8"]];
+      const sh = h.stepHeat, walk = [1, 2, 3, 4, 5].map((k) => sh[0] + sh[1] * (k - 1));
+      const rows = [["攻撃", h.atk, h.stats.atk, C.gold], ["移動", h.mov, h.stats.mov, C.move]];
       rows.forEach(([k, v, n, col], i) => {
         const y = 324 + i * 24;
         A.jp(ctx, k, 28, y - 4, { size: 16, color: C.dim });
         for (let j = 0; j < 6; j++) { ctx.fillStyle = C.ink; ctx.fillRect(100 + j * 20, y - 2, 18, 14); ctx.fillStyle = j < n ? col : "#2e2447"; ctx.fillRect(102 + j * 20, y, 14, 10); }
         A.text(ctx, String(v), 234, y, { s: 2, color: C.cream });
       });
+      A.jp(ctx, "歩く熱", 28, 368, { size: 16, color: C.dim });
+      A.jp(ctx, walk.join("→") + "…", 100, 368, { size: 16, color: "#ff8f6a" });
       A.jp(ctx, "撃破で移動回復", 28, 394, { size: 16, color: C.dim });
       A.text(ctx, "+" + h.refund, 234, 398, { s: 2, color: C.heal });
       A.jp(ctx, "【" + h.trait + "】", 28, 428, { size: 16, color: C.gold });
@@ -1700,7 +1700,7 @@
       this.cards = []; this.selected = -1; this.title = "戦利品"; this.sub = "";
       this.confirm = this.add(new ButtonView("reward.confirm", "受け取る", 200, 50));
       this.confirm.x = 80; this.confirm.y = 520;
-      this.skip = this.add(new ButtonView("reward.skip", "見送る（熱−10）", 200, 38, { face: "#3a2f58", top: "#5a4a82", base: "#1a1428", color: C.cream, outline: C.ink }));
+      this.skip = this.add(new ButtonView("reward.skip", "見送る（熱−10%）", 200, 38, { face: "#3a2f58", top: "#5a4a82", base: "#1a1428", color: C.cream, outline: C.ink }));
       this.skip.x = 80; this.skip.y = 582;
     }
     setRewards(list) {
@@ -1778,7 +1778,7 @@
 
   const HELP = [
     { t: "ルートを描く", b: "主人公から指でなぞるか、行き先のマスをタップして道を作る（斜めもOK）。出撃ボタンで駆け抜ける。最初のターンは光る3マスのどこからでも出発できる。敵は長押しで詳しく見られる。", demo: "route" },
-    { t: "熱ゲージ", b: "歩く・反撃を受ける・夜の圧で熱が上がり、100で燃え尽きる。敵を倒すと熱が下がる（熱いほど多く下がる）。熱40と65で攻撃+1・+2、仲間のゲージもたまりやすい。熱は戦闘をまたいで残り、焚き火で下がる。", demo: "heat" },
+    { t: "熱ゲージ", b: "歩くと熱がたまる（1ルートで歩くほど1歩の熱が増える）。反撃・攻撃予告・夜の圧でも熱が上がり、100で燃え尽きる。熱いほど攻撃ダメージと仲間のゲージに倍率がかかる（熱100で×2）。敵を倒す・夜風・焚き火で、今の熱の何割かが下がる。熱は戦闘をまたいで残る。", demo: "heat" },
     { t: "敵を切り抜ける", b: "道の途中に敵がいれば、通り抜けざまに斬る。倒しきれなかった敵は進行方向へ2マス押し出される。終点は空きマスで。", demo: "attack" },
     { t: "ウィークサイド", b: "盾に囲まれていない光る側面が弱点。矢印の方向からまっすぐ突っ込むと大ダメージ。", demo: "weak" },
     { t: "反撃", b: "盾のある側から上下左右にまっすぐ斬って、倒しきれないと反撃を受け、熱が大きく上がる。斜めから斬れば反撃されない（弱点ボーナスもなし）。", demo: "guard" },
@@ -1786,9 +1786,9 @@
     { t: "押し出しともつれ", b: "押された敵が壁・岩・足跡・敵にぶつかると衝突ダメージ（残り移動が多いほど強い）を受け「もつれ」る。もつれた敵は反撃せず、斬れば弱点ダメージ（斬るとほどける）。敵同士は同じマスに重なる。同じ敵を2回目以降に斬ると押すだけ。", demo: "push" },
     { t: "岩", b: "岩はマスごと塞ぐが、岩と岩の斜めのすき間は通れる。押された敵は岩や盤面の端にぶつかって止まり、もつれる。", demo: "wall" },
     { t: "攻撃予告", b: "骨砕きとボスは、次の敵ターンに攻撃するマスを黄色く予告する。そこで終わると被弾。押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
-    { t: "撃破で移動回復", b: "敵を倒すと移動力が回復し、熱も下がる（1ルートで最初の撃破は移動+2、2体目からは+1）。歩数は熱が低いほど多いが、最低歩数は必ず残る。", demo: "chain" },
+    { t: "撃破で移動回復", b: "敵を倒すと移動力が回復し、熱も下がる（1ルートで最初の撃破は移動+2、2体目からは+1）。倒して、進んで、また倒す。", demo: "chain" },
     { t: "燠火の足跡", b: "歩いたマスは燃えて、しばらく入れない。斜めに交差するのはOK。敵がいたマスは燃えないので、もう一度踏み込める。仲間が増えるほど足跡は長く残る。", demo: "ember" },
-    { t: "夜の圧", b: "ターン終了時、生き残った敵の圧（紫の炎）で熱が上がり、そのあと夜風で少し冷える。圧だけで燃え尽きることはない。触れなかった敵は、次のターンから圧が+1ずつ溜まっていく。", demo: "pressure" },
+    { t: "夜の圧", b: "ターン終了時、生き残った敵の圧（紫の炎）1につき熱+3、そのあと夜風で今の熱の2割が冷える。圧で100に届けば燃え尽きる。触れなかった敵は、次のターンから圧が+1ずつ溜まっていく。", demo: "pressure" },
     { t: "戦闘目標", b: "右上の2つの札は、この戦闘の目標と報酬。達成して勝つと、その報酬がもらえる。欲しいものがあれば狙ってみよう。", demo: "route" },
     { t: "仲間の力", b: "仲間のゲージは、ルートが条件の形（直進・直角・輪…）を満たすたびと、1歩ごとにたまる。熱いほど早い。満タンでターンを始めた仲間は、ルートを描いたあとカードをタップすると、ルートの先端で能力を撃つ。", demo: "comp" },
   ];
@@ -1842,7 +1842,7 @@
         ctx.fillStyle = C.ink; ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
         ctx.fillStyle = "#2a1620"; ctx.fillRect(bx, by, bw, bh);
         ctx.fillStyle = hv >= 65 ? "#ff3b4e" : hv >= 40 ? "#ff6a2a" : "#ffa63a"; ctx.fillRect(bx, by, Math.round((bw * hv) / 100), bh);
-        for (const [tv, lab] of [[40, "攻+1"], [65, "攻+2"]]) { const tx = bx + Math.round((bw * tv) / 100); ctx.fillStyle = C.ink; ctx.fillRect(tx - 1, by, 2, bh); A.jp(ctx, lab, tx, by + bh + 4, { size: 12, align: "center", color: hv >= tv ? C.emberL : C.mute }); }
+        A.jp(ctx, "攻撃・仲間ゲージ ×" + (1 + hv / 100).toFixed(1), 180, by + bh + 6, { size: 12, align: "center", color: hv >= 40 ? C.emberL : C.dim });
         A.jp(ctx, "100 燃え尽き", bx + bw, by - 22, { size: 12, align: "right", color: "#ff8f9b" });
         A.text(ctx, String(hv), bx - 8, by + 4, { s: 2, align: "right", color: C.cream });
         A.spr(ctx, "kai", 180, 176, { s: 2, white: hv > 85 ? 0.3 : 0 });
