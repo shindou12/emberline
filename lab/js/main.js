@@ -124,6 +124,7 @@
 
     const input = new EL.InputManager(canvas, v.root);
     input.onAny = () => EL.Audio.init();
+    input.onCancel = () => med.cancelInput();
     input.onHoverOff = () => { if (med.hoverKey != null || med.inspectUid) { med.hoverKey = null; if (!med.pressShown) med.inspectStop(); } };
     document.addEventListener("touchend", () => EL.Audio.init(), { passive: true });
     window.addEventListener("keydown", () => EL.Audio.init(), { once: true });

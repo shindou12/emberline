@@ -86,7 +86,7 @@
       t.alpha = 0; t.y = 400;
       EL.tween(t, { alpha: 1, y: 386 }, 160, { clock: "ui" });
       clearTimeout(this.toastTimer);
-      this.toastTimer = setTimeout(() => EL.tween(t, { alpha: 0 }, 250, { clock: "ui" }), ms || 1600);
+      this.toastTimer = setTimeout(() => EL.tween(t, { alpha: 0 }, 250, { clock: "ui" }), ms || 2000);
     }
     /* back to the lab picker, remembering how this board went */
     labDone(result) {
@@ -100,7 +100,7 @@
     toastRelic(id) { const r = D.RELICS[id]; S.play("hover"); this.toast(r.name, r.desc, r.icon); }
     toastComp(id) {
       const c = D.COMPANIONS[id]; S.play("hover");
-      this.toast(`${c.name}「${c.skill}」`, `条件：${c.condLong}\n効果：${c.skillText}`, null, 2200);
+      this.toast(`${c.name}「${c.skill}」`, `条件：${c.condLong}\n効果：${c.skillText}`, null, 2600);
     }
     refreshRunHud() {
       const v = this.v, run = this.run;
@@ -507,6 +507,16 @@
       const tele = e.tele && !e.tangled ? `・予告${e.tele.dmg}` : "";
       const cd = e.cdMax ? `・カウント${e.cd}` : "";
       this.toast(`${info.name}　HP${e.hp}/${e.maxHp}`, `反撃${e.atk}${tele}${cd}・圧${L.enemyPressure(this.run, B, e)}・弱点：${sealed ? "封印中" : wk + "側"}${e.tangled ? "・もつれ中" : ""}\n${info.desc}`, null, ms || 3200);
+    }
+    /* right click: drop what is in hand — the details, the route being drawn, or the planned route */
+    cancelInput() {
+      if (this.busy || this.paused || this.v.help.visible) return;
+      if (this.inspectUid || this.inspectOpen) { this.pressShown = false; this.inspectStop(); return; }
+      if (this.state === "Battle.Dragging" || this.state === "Battle.Planned") {
+        S.play("cancel");
+        this.setDragUI(false);
+        this.go("Battle.Idle");
+      }
     }
     /* a press on the board: held on an enemy for a moment, it explains the enemy (without moving) */
     armPress(d) {

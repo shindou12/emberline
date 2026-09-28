@@ -283,6 +283,8 @@ window.EL = window.EL || {};
     down(e) {
       e.preventDefault();
       if (this.onAny) this.onAny();
+      // right click cancels and never starts a press
+      if (e.button === 2) { this.rightHeld = true; if (this.onCancel) this.onCancel(); return; }
       if (this.active !== null) return;
       const p = this.pos(e);
       const h = this.root.hit(p.x, p.y);
@@ -300,10 +302,17 @@ window.EL = window.EL || {};
     move(e) {
       // a mouse moving with no button held: hover (enemy info on desktop)
       if (this.active === null && e.pointerType === "mouse") {
+        this.rightHeld = (e.buttons & 2) !== 0;
         const p = this.pos(e), h = this.root.hit(p.x, p.y);
         if (h && h.node.inputKind === "route") h.node.routeInput("hover", p);
         else if (this.onHoverOff) this.onHoverOff();
         return;
+      }
+      // a right button pressed while the left is held arrives as a move with buttons changed
+      if (e.pointerType === "mouse") {
+        const r = (e.buttons & 2) !== 0;
+        if (r && !this.rightHeld && this.onCancel) this.onCancel();
+        this.rightHeld = r;
       }
       if (e.pointerId !== this.active) return;
       e.preventDefault();
@@ -318,6 +327,7 @@ window.EL = window.EL || {};
       }
     }
     up(e) {
+      if (e.button === 2) this.rightHeld = false;
       if (e.pointerId !== this.active) return;
       e.preventDefault();
       const p = this.pos(e);
