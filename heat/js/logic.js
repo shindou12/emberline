@@ -30,20 +30,36 @@
   /* ---------- heat ----------
      The hero runs hot. run.hp / T.hp hold the MARGIN left before burning out
      (margin = 100 − heat), so "damage" raises heat and "healing" cools it.
-     Walking heats you (each step of a route more than the last, per hero);
-     enemy attacks heat you and burn you out at 100. Heat multiplies your
-     damage and your companions' charge. It never slows you down. */
+     Heat is also your movement: every step of a route heats you more than the
+     last (per hero), and you may walk as long as a step keeps you under 100.
+     Enemy attacks heat you and burn you out at 100. Heat multiplies your damage
+     and your companions' charge. */
   const HT = BAL.heat;
   const heatOf = (hp) => 100 - hp;
   const atkMul = (hp) => 1 + (HT.atkHeat * heatOf(hp)) / 100;
   // heat of the k-th step of a route (1-based): base + inc × (k − 1)
-  const stepHeatOf = (run, k) => { const s = D.HEROES[run.heroId].stepHeat; return s[0] + s[1] * (k - 1); };
+  // heat of the k-th step of a route: a share of the margin left (100 − heat), growing with every step (per hero)
+  const stepHeatOf = (run, hp, k) => {
+    const s = D.HEROES[run.heroId].stepPct;
+    return Math.max(1, Math.round(hp * (s[0] + s[1] * (k - 1)) * (has(run, "boots") ? 0.85 : 1)));
+  };
+  // how many more steps fit under 100, starting at the k-th step of the route (free steps cost nothing)
+  function affordable(run, hp, k, free) {
+    let n = 0;
+    while (n < 40) {
+      if (free > 0) { free--; n++; continue; }
+      const c = stepHeatOf(run, hp, k);
+      if (c >= hp) break;
+      hp -= c; k++; n++;
+    }
+    return n;
+  }
   const ventOf = (hp, first) => { const v = HT.ventBase + Math.round(heatOf(hp) * HT.ventPct); return first ? v : Math.round(v * HT.ventLater); };
   const hitHeat = (run, dmg) => dmg * (HT.dmgMul + (has(run, "pact") ? 1 : 0));
   // the night: each point of pressure takes a share of the margin (it never burns you out by itself)
   const pressHeat = (hp, P) => (P <= 0 ? 0 : HT.pressFix ? P * HT.pressFix : Math.min(hp - 1, Math.round(hp * (1 - Math.pow(1 - HT.pressPct, P)))));
   const coolOf = (hp) => Math.round(heatOf(hp) * HT.cool);
-  const chargeMul = (run, hp) => (1 + (HT.chargeHeat * heatOf(hp)) / 100) * (has(run, "charm") ? 1.3 : 1);
+  const chargeMul = (run, hp) => (HT.chargeScale || 1) * (1 + (HT.chargeHeat * heatOf(hp)) / 100) * (has(run, "charm") ? 1.3 : 1);
 
   /* ---------- run ---------- */
   function createRun(heroId, seed) {
@@ -68,7 +84,7 @@
     if (has(run, "lantern")) atk += 1;
     if (has(run, "banner")) atk += run.companions.length;
     if (has(run, "heart") && hp <= run.maxHp / 2) atk += 2;
-    const mov = h.mov + run.bonusMov + (has(run, "boots") ? 1 : 0);
+    const mov = affordable(run, hp, 1, 0); // steps a fresh route could take
     const refund = h.refund + (has(run, "fang") ? 1 : 0);
     let weakMult = 2;
     if (has(run, "dirk")) weakMult += 1;
@@ -225,6 +241,10 @@
     const B = { w: BAL.GW, h: BAL.GH, tiles: new Array(BAL.GW * BAL.GH).fill(0), enemies: [], hero: { x: 3, y: 7 }, trail: [], turn: 1, kind: node.type, isBoss: node.type === "boss", phase2: false, uidSeq: 0, row: node.row, bst: { chain: 0, weak: 0, bumps: 0, multi: 0, guardHits: 0, friendly: 0 }, objectives: [] };
     B.trail = [{ x: 3, y: 7 }];
     B.loc = pickLocation(rng, node);
+    // companion gauges start every battle empty (twin: half; the spring: full once)
+    run.charge = {};
+    for (const c of run.companions) run.charge[c] = run.flags.fullCharge ? 100 : has(run, "twin") ? 50 : 0;
+    run.flags.fullCharge = false;
     if (B.isBoss) {
       for (const [x, y] of [[0, 4], [6, 4], [1, 0], [5, 0]]) B.tiles[idx(B, x, y)] = 1;
       const boss = makeEnemy(B, "boss", 2, 1, rng);
@@ -437,33 +457,34 @@
       forcedWeak: 0, uses: {}, marks: {}, dirs: [], straight: 0, route: [route[0]],
       compassUsed: false, plumeUsed: run.plumeUsed, bumps: 0, tangles: 0, multi: 0,
       cold: new Set(), coldAt: [false], hitCount: {}, touched: new Set(),
-      charge: Object.assign({}, run.charge), fired: [], stepN: 0,
+      charge: Object.assign({}, run.charge), fired: [], stepN: 0, free: 0,
     };
-    // a gauge can be fired only if it was full when the turn began (twin: as soon as it fills)
+    // a full gauge can be fired from any later tile of the route
     T.ready = new Set(run.companions.filter((c) => (T.charge[c] || 0) >= 100));
     const events = [], steps = [];
     let outcome = "ok", last = 0, done = false;
     const alive = () => st.enemies.filter((e) => e.alive);
     const push = (ev) => { events.push(ev); return ev; };
 
+    // T.moves is derived: the steps that still fit under 100
+    const sync = () => (T.moves = affordable(run, T.hp, T.stepN + 1, T.free));
     const heal = (n, vent) => {
       const before = T.hp;
       T.hp = Math.min(run.maxHp, T.hp + n);
+      sync();
       if (T.hp > before) push({ type: "heal", amount: T.hp - before, hp: T.hp, vent: !!vent });
       return T.hp - before;
     };
     function kill(e, src, rec) {
       e.alive = false;
       T.kills++; T.chain++;
-      // the first kill of a route refunds in full, later kills one less
-      let refund = stats(run, T.hp).refund - (T.kills > 1 ? BAL.refundDecay : 0);
-      let bonusHeal = 0;
-      if (has(run, "chain") && T.chain >= 3) { refund += 1; bonusHeal = Math.round(heatOf(T.hp) * 0.05); }
-      if (has(run, "rope") && e.tangled) refund += 1;
-      T.moves += refund;
-      push({ type: "kill", uid: e.uid, refund, chain: T.chain, moves: T.moves, src, x: e.x, y: e.y, size: e.size });
-      // a kill vents heat: more when you are hotter, less for later kills in the same route
-      heal(ventOf(T.hp, T.kills === 1) + bonusHeal, true);
+      // a kill vents a share of your heat (less for later kills in the same route): that is what lets you walk on
+      let extra = 0;
+      if (has(run, "fang")) extra += 0.05;
+      if (has(run, "chain") && T.chain >= 3) extra += 0.05;
+      if (has(run, "rope") && e.tangled) extra += 0.05;
+      push({ type: "kill", uid: e.uid, refund: 0, chain: T.chain, moves: T.moves, src, x: e.x, y: e.y, size: e.size });
+      heal(ventOf(T.hp, T.kills === 1) + Math.round(heatOf(T.hp) * extra), true);
       if (rec) rec.kills.push(e.uid);
       if (!alive().length) { outcome = "victory"; push({ type: "victory" }); done = true; }
     }
@@ -477,7 +498,7 @@
     }
     function heroHurt(dmg, e) {
       const heat = hitHeat(run, dmg);
-      T.hp -= heat; T.dmgTaken += dmg;
+      T.hp -= heat; T.dmgTaken += dmg; sync();
       push({ type: "guard", uid: e.uid, dmg, heat, hp: Math.max(0, T.hp) });
       if (T.hp <= 0) {
         if (has(run, "plume") && !T.plumeUsed) { T.plumeUsed = true; T.hp = 50; push({ type: "revive", hp: 50 }); }
@@ -584,7 +605,7 @@
     function chargeStep(i, rec) {
       for (const comp of run.companions) T.charge[comp] = Math.min(100, (T.charge[comp] || 0) + D.COMPANIONS[comp].charge[1] * chargeMul(run, T.hp));
       trySkills(i, rec);
-      if (has(run, "twin")) for (const comp of run.companions) if (T.charge[comp] >= 100) T.ready.add(comp);
+      for (const comp of run.companions) if (T.charge[comp] >= 100) T.ready.add(comp);
       for (const f of [].concat(route[i].fire || [])) {
         if (done || !T.ready.has(f) || (T.charge[f] || 0) < 100) continue;
         T.charge[f] = 0; T.ready.delete(f); T.fired.push({ comp: f, i });
@@ -619,7 +640,7 @@
           alive().filter((e) => data.area.some((t) => covers(e, t.x, t.y))).forEach((e) => { if (e.alive && !done) hit(e, info.power); });
           break;
         }
-        case "haste": T.moves += info.power; ev.moves = T.moves; data.amount = info.power; break;
+        case "haste": T.free += info.power; sync(); ev.moves = T.moves; data.amount = info.power; break;
         case "volley": {
           const targets = alive().sort((a, b) => a.hp - b.hp || cheb(a, here) - cheb(b, here)).slice(0, 2);
           data.targets = targets.map((e) => e.uid);
@@ -647,11 +668,11 @@
 
     for (let i = 1; i < route.length && !done; i++) {
       const a = route[i - 1], b = route[i];
+      // walking heats you up, each step more than the last; a step that would reach 100 is not allowed
       if (T.moves < 1) break;
-      T.moves--;
-      // walking heats you up, each step more than the last (a step alone never burns you out)
-      T.stepN++;
-      T.hp = Math.min(T.hp, Math.max(1, T.hp - stepHeatOf(run, T.stepN)));
+      if (T.free > 0) T.free--;
+      else { T.stepN++; T.hp -= stepHeatOf(run, T.hp, T.stepN); }
+      sync();
       const d = [b.x - a.x, b.y - a.y];
       T.straight = T.dirs.length && dirEq(T.dirs[T.dirs.length - 1], d) ? T.straight + 1 : 1;
       T.dirs.push(d);
@@ -726,7 +747,7 @@
       if (!done) chargeStep(i, rec);
       if (!done && has(run, "compass") && !T.compassUsed) {
         for (let j = i - 5; j >= 0; j--) if (cheb(T.route[j], b) === 1) {
-          T.compassUsed = true; T.moves += 2;
+          T.compassUsed = true; T.free += 2; sync();
           push({ type: "relic", id: "compass", moves: T.moves });
           rec.relic = "compass";
           break;
@@ -1112,7 +1133,7 @@
     CARD, CW, DIRS8, rngFrom, createRun, stats, genMap, nextNodes, genBattle, startCandidates,
     blockedSet, stepError, isWeakEntry, sealedBy, enemyAt, enemiesAt, covers, isRock, idx, inB,
     simulate, commitRoute, enemyPhase, genRewards, applyReward, heal, coolPct, battleHeal, reachable, weakEntries,
-    condReq, condProgress, pressureOf, heatOf, atkMul, stepHeatOf, ventOf, hitHeat, pressHeat, coolOf, chargeMul, endHeat, enemyPressure, has, coolCount, canMove, unstick,
+    condReq, condProgress, pressureOf, heatOf, atkMul, stepHeatOf, affordable, ventOf, hitHeat, pressHeat, coolOf, chargeMul, endHeat, enemyPressure, has, coolCount, canMove, unstick,
     teleTiles, teleDmgAt, planTelegraphs, pushDist,
     objectiveState, claimObjectives,
   };

@@ -66,7 +66,8 @@
       const v = this.v;
       const battle = mode === "battle", map = mode === "map";
       v.hudLayer.visible = battle || map;
-      v.moveHUD.visible = v.pressureHUD.visible = battle;
+      v.moveHUD.visible = v.pressureHUD.visible = false; // heat is the one gauge (bottom bar)
+      v.playerHUD.bottom = battle;
       v.objHUD.visible = battle;
       v.companionHUD.visible = battle;
       v.pauseBtn.visible = battle || map;
@@ -91,7 +92,7 @@
     toastComp(id) {
       const c = D.COMPANIONS[id]; S.play("hover");
       const g = Math.round(this.run ? this.run.charge[id] || 0 : 0);
-      this.toast(`${c.name}「${c.skill}」 ${g}%`, `ゲージ：${c.condLong}（+${c.charge[0]}）・1歩ごと+${c.charge[1]}\n熱が高いほど早くたまる。満タンでターンを始めると撃てる\n効果：${c.skillText}`, null, 3600);
+      this.toast(`${c.name}「${c.skill}」 ${g}%`, `ゲージ：${c.condLong}（+${c.charge[0]}）・1歩ごと+${c.charge[1]}\n熱が高いほど早くたまる。満タンになったらカードをタップ→ルートの先端で撃つ（戦闘ごとにリセット）\n効果：${c.skillText}`, null, 3600);
     }
     /* tapping a companion: fire it at the tip of the planned route (tap again to cancel) */
     compTap(id) {
@@ -121,7 +122,7 @@
       const n = this.nightOf(run.hp, B.enemies, L.teleDmgAt(B, B.enemies, B.hero.x, B.hero.y), 0);
       v.pressureHUD.value = n.press; v.pressureHUD.tele = n.teleHeat; v.pressureHUD.cool = n.cool;
       v.pressureHUD.prev = null; v.pressureHUD.telePrev = null; v.pressureHUD.coolPrev = null;
-      v.playerHUD.night = n.heat;
+      v.playerHUD.night = n.heat; v.playerHUD.nightInfo = n;
     }
     resetCards(planning) {
       const run = this.run;
@@ -384,7 +385,7 @@
           this.v.route.bad = { x: nx.x, y: nx.y, t: this.v.route.t };
           this.lastBad = nx; this.lastBadT = EL.Time.ui;
           S.play("invalid");
-          if (err === "moves") this.hint("移動力が足りない — 撃破で回復する");
+          if (err === "moves") this.hint("熱が限界 — 敵を倒せば熱が下がる");
           else if (err === "ember") this.hint("燃えている足跡には入れない（斜めの交差はOK）");
         }
       }
@@ -441,6 +442,7 @@
       const night = this.nightOf(res.T.hp, res.st.enemies.filter((e) => e.alive), res.teleEnd, res.T.moves);
       v.pressureHUD.prev = night.press; v.pressureHUD.telePrev = night.teleHeat; v.pressureHUD.coolPrev = night.cool;
       v.playerHUD.night = res.outcome === "ok" ? night.heat : null;
+      v.playerHUD.nightInfo = res.outcome === "ok" ? night : null;
       rt.teleEnd = night.teleHeat;
       this.refreshBoardMarks(res.st.enemies, res.end);
       let readyIdle = false;
@@ -486,7 +488,7 @@
       else if (guardDmg > 0) this.hint(`反撃 熱+${guardDmg} — 弱点か斜めから斬れば反撃されない`);
       else if (skills) this.hint("仲間の能力が発動する！");
       else if (readyIdle) this.hint("光る仲間をタップ → ルートの先端で能力を撃つ");
-      else if (kills) this.hint(kills === 1 ? `撃破で移動+${L.stats(run).refund} — まだ伸ばせる` : "2体目以降の撃破は移動+1 — 目標を見極めて");
+      else if (kills) this.hint("撃破で熱が下がる — まだ伸ばせる");
       else if (this.route.length > 1) this.hint("指を離して、出撃ボタンで実行");
       else this.hint("光る側面からまっすぐ突っ込め");
     }
@@ -523,7 +525,7 @@
         this.preview = L.simulate(B, this.run, this.route);
       }
       if (added) { S.play("step", this.route.length - 1); this.updatePreview(); }
-      if (!sameTile(this.route[this.route.length - 1], tile)) { S.play("invalid"); this.hint("移動力が足りない — 撃破で回復する"); }
+      if (!sameTile(this.route[this.route.length - 1], tile)) { S.play("invalid"); this.hint("熱が限界 — 敵を倒せば熱が下がる"); }
     }
     enemyInfo(e) {
       const B = this.B, info = D.ENEMIES[e.type];
@@ -568,7 +570,7 @@
       v.board.teles = [];
       this.clearTargets();
       v.companionHUD.cards.forEach((c) => { c.prev = null; c.gain = 0; c.armed = null; c.planning = false; });
-      v.playerHUD.night = null;
+      v.playerHUD.night = null; v.playerHUD.nightInfo = null;
       this.chain = 0;
       this.footN = 0;
       this.deadSet = new Set();
@@ -861,7 +863,7 @@
         }
         case "haste": {
           v.fx.burst(hero.x, hero.y - 16, 16, { speed: [40, 120], life: [300, 600], palette: [C.move, C.cream, "#d3dbea"], size: 2, shape: "plus" });
-          v.floats.spawn("+" + ev.data.amount + " MOVE", hero.x, hero.y - 56, { s: 2, color: C.heal, life: 900 });
+          v.floats.spawn(`${ev.data.amount}歩 熱0`, hero.x, hero.y - 56, { kind: "jp", color: C.move, life: 900 });
           if (ev.moves != null) v.moveHUD.moves = ev.moves;
           v.moveHUD.pulse = 1; EL.tween(v.moveHUD, { pulse: 0 }, 300, { clock: "ui" });
           S.play("gear");
@@ -936,7 +938,7 @@
     }
     async ev_relic(ev) {
       const v = this.v, h = v.hero;
-      v.floats.spawn("+2 MOVE", h.x, h.y - 56, { s: 2, color: C.heal, life: 800 });
+      v.floats.spawn("2歩 熱0", h.x, h.y - 56, { kind: "jp", color: C.move, life: 800 });
       v.moveHUD.moves = ev.moves;
       v.relicHUD.fresh = ev.id; setTimeout(() => (v.relicHUD.fresh = null), 900);
       S.play("refund", 4);
@@ -1598,7 +1600,7 @@
           case "recruit": S.play("confirm"); this.go("Reward", { kind: "lost", title: "迷い灯", sub: "誰を連れて行く？" }); break;
           case "heal10": { const h = L.coolPct(run, 0.3); S.play("heal"); back("灯を預けた", `熱が${h}下がった`); break; }
           case "heal14": { const h = L.coolPct(run, 0.45); S.play("heal"); back("燠泉を飲んだ", `熱が${h}下がった`); break; }
-          case "maxhp5": run.companions.forEach((id) => (run.charge[id] = 100)); S.play("relic"); back("燠泉を浴びた", "仲間のゲージが満タンになった"); break;
+          case "maxhp5": run.flags.fullCharge = true; S.play("relic"); back("燠泉を浴びた", "次の戦闘、仲間のゲージが満タンで始まる"); break;
           case "cursed": { run.hp -= 20; run.flags.cursed = true; const id = grant(false); S.play("roar"); back(id ? D.RELICS[id].name + "を手に入れた" : "空っぽだった", "次の戦闘に骨砕きが紛れ込む…", id ? D.RELICS[id].icon : null); break; }
           default: S.play("cancel"); back(); break;
         }

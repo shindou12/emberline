@@ -66,7 +66,7 @@ function bestRoute(B, run, beam, prof) {
         const r2 = L.simulate(B, run, route);
         const cands = [{ route, res: r2 }];
         // a gauge that is ready may be fired on this tile
-        if (r2.outcome === "ok") for (const c of run.companions) if (r2.T.ready.has(c)) {
+        if (r2.outcome === "ok") for (const c of run.companions) if (r2.T.ready.has(c) && !(nt.fire)) {
           const rf = f.route.concat([{ x: nt.x, y: nt.y, fire: c }]);
           cands.push({ route: rf, res: L.simulate(B, run, rf) });
         }

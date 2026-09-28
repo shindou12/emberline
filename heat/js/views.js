@@ -1197,6 +1197,7 @@
       A.panel(ctx, 6, 6, 44, 44, { fill: "#2b1d3d" });
       A.spr(ctx, this.sprite, 28, 44, { s: 2, white: this.flash });
       A.jp(ctx, this.name, 58, 6, { size: 16, color: C.cream });
+      if (this.bottom) { this.drawBottom(ctx); return; }
       const x = 58, y = 30, w = 112, h = 12;
       const heat = Math.max(0, Math.min(100, 100 - this.shown));
       const col = (hv) => (hv >= 65 ? "#ff3b4e" : hv >= 40 ? "#ff6a2a" : "#ffa63a");
@@ -1238,6 +1239,58 @@
       A.jp(ctx, "熱　攻×" + mul.toFixed(1), x + w + 6, y - 20, { size: 12, color: mul >= 1.4 ? C.emberL : C.dim, ow: 1 });
     }
   }
+  /* in battle the gauge is the one bar at the bottom of the screen: heat now, the planned
+     route's heat (blinking), and — faint — what the night will add. It is also your movement. */
+  PlayerHUD.prototype.drawBottom = function (ctx) {
+    const HT = D.BAL.heat;
+    const X = 12, Y = 470, W = 336, H = 46;
+    A.panel(ctx, X, Y, W, H, { fill: "#1f1422", rim: "#5a2a3a", hi: C.ember });
+    const x = X + 30, y = Y + 8, w = W - 40, h = 14;
+    const heat = Math.max(0, Math.min(100, 100 - this.shown));
+    const col = (hv) => (hv >= 65 ? "#ff3b4e" : hv >= 40 ? "#ff6a2a" : "#ffa63a");
+    const px = (hv) => x + Math.round((w * Math.max(0, Math.min(100, hv))) / 100);
+    const blink = Math.floor(this.t / 120) % 2;
+    A.spr(ctx, "i_flame", X + 15, y + h + 2, { s: 2, ax: 0.5, ay: 1 });
+    ctx.fillStyle = C.ink; ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+    ctx.fillStyle = "#2a1620"; ctx.fillRect(x, y, w, h);
+    const fw = px(heat) - x;
+    ctx.fillStyle = col(heat); ctx.fillRect(x, y, fw, h);
+    ctx.fillStyle = "#ffe08a"; ctx.fillRect(x, y, fw, 2);
+    ctx.fillStyle = "#8a2410"; ctx.fillRect(x, y + h - 2, fw, 2);
+    if (heat >= 40) {
+      ctx.fillStyle = "#fff0b0";
+      for (let i = 0; i < 5; i++) { const fx = x + ((this.t / 7 + i * 41) % Math.max(1, fw)); ctx.fillRect(Math.floor(fx), y - 2 - (i % 2) * 2, 2, 2); }
+    }
+    const now = heat, after = this.prev != null ? 100 - this.prev : now;
+    if (after !== now) {
+      const a = px(Math.min(now, after)), b = px(Math.max(now, after));
+      if (after > now) { ctx.fillStyle = blink ? "#ffffff" : col(after); ctx.fillRect(a, y, b - a, h); }
+      else { ctx.fillStyle = blink ? "#7fd8ff" : "#2a4a6a"; ctx.fillRect(a, y + 3, b - a, h - 6); }
+    }
+    // the night's damage, faint, on top of where the route leaves you
+    const n = this.nightInfo;
+    if (n && n.heat > after) {
+      const a = px(after), b = px(n.heat);
+      ctx.globalAlpha = 0.45; ctx.fillStyle = n.heat >= 100 ? (blink ? "#ff4d5e" : "#8f2231") : "#b08cff";
+      ctx.fillRect(a, y + 2, b - a, h - 4);
+      ctx.globalAlpha = 1;
+      for (let sx = a + 2; sx < b; sx += 4) { ctx.fillStyle = "rgba(20,10,30,0.35)"; ctx.fillRect(sx, y + 2, 1, h - 4); }
+    }
+    for (let k = 1; k < 4; k++) { ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(px(k * 25) - 1, y, 2, h); }
+    // text row
+    const ty = y + h + 5;
+    const hv = Math.round(after);
+    const tc2 = after > now ? "#ffb0a0" : after < now ? C.move : C.cream;
+    A.jp(ctx, "熱", x, ty, { size: 12, color: C.dim, ow: 1 });
+    A.jp(ctx, after !== now ? `${Math.round(now)}→${hv}` : String(hv), x + 16, ty, { size: 12, color: tc2, ow: 1 });
+    if (n) {
+      const lab = n.teleHeat > 0 ? `夜 +${n.press}　予告 +${n.teleHeat}` : `夜 +${n.press}`;
+      A.jp(ctx, lab, x + 104, ty, { size: 12, color: n.heat >= 100 ? (blink ? "#ff4d5e" : "#ffb0b8") : "#c9b3ff", ow: 1 });
+    }
+    const mul = 1 + (HT.atkHeat * Math.max(0, Math.min(100, after))) / 100;
+    A.jp(ctx, "攻×" + mul.toFixed(1), x + w, ty, { size: 12, align: "right", color: mul >= 1.4 ? C.emberL : C.dim, ow: 1 });
+    if (n && n.heat >= 100) A.jp(ctx, "燃え尽きる！", x + w, y - 1, { size: 12, align: "right", color: blink ? "#ffffff" : "#ff4d5e", ow: 1 });
+  };
   V.PlayerHUD = PlayerHUD;
 
   class TurnHUD extends EL.Node {
@@ -1635,8 +1688,10 @@
       A.panel(ctx, 12, 244, 336, 308, { fill: "#1c1530" });
       A.jp(ctx, h.title, 28, 256, { size: 16, color: h.color });
       A.jp(ctx, h.name, 28, 276, { size: 32, color: C.cream });
-      const sh = h.stepHeat, walk = [1, 2, 3, 4, 5].map((k) => sh[0] + sh[1] * (k - 1));
-      const rows = [["攻撃", h.atk, h.stats.atk, C.gold], ["移動", h.mov, h.stats.mov, C.move]];
+      // walking: each step heats a share of what is left under 100, rising step by step
+      const sp = h.stepPct, walk = [1, 2, 3, 4].map((k) => Math.round((sp[0] + sp[1] * (k - 1)) * 100) + "%");
+      const steps = EL.Logic.affordable({ heroId: id, relics: [] }, 100, 1, 0);
+      const rows = [["攻撃", h.atk, h.stats.atk, C.gold], ["歩数", steps, Math.round(steps / 2) - 1, C.move]];
       rows.forEach(([k, v, n, col], i) => {
         const y = 324 + i * 24;
         A.jp(ctx, k, 28, y - 4, { size: 16, color: C.dim });
@@ -1644,9 +1699,8 @@
         A.text(ctx, String(v), 234, y, { s: 2, color: C.cream });
       });
       A.jp(ctx, "歩く熱", 28, 368, { size: 16, color: C.dim });
-      A.jp(ctx, walk.join("→") + "…", 100, 368, { size: 16, color: "#ff8f6a" });
-      A.jp(ctx, "撃破で移動回復", 28, 394, { size: 16, color: C.dim });
-      A.text(ctx, "+" + h.refund, 234, 398, { s: 2, color: C.heal });
+      A.jp(ctx, "残りの " + walk.join("→") + "…", 100, 368, { size: 16, color: "#ff8f6a" });
+      A.jp(ctx, "（歩数は熱0から歩ける目安）", 28, 394, { size: 12, color: C.mute });
       A.jp(ctx, "【" + h.trait + "】", 28, 428, { size: 16, color: C.gold });
       A.wrap(ctx, h.traitText, 300, 16).forEach((l, i) => A.jp(ctx, l, 28, 452 + i * 20, { size: 16, color: C.cream }));
       A.wrap(ctx, h.style, 300, 16).forEach((l, i) => A.jp(ctx, l, 28, 518 + i * 20, { size: 16, color: C.dim }));
@@ -1778,7 +1832,7 @@
 
   const HELP = [
     { t: "ルートを描く", b: "主人公から指でなぞるか、行き先のマスをタップして道を作る（斜めもOK）。出撃ボタンで駆け抜ける。最初のターンは光る3マスのどこからでも出発できる。敵は長押しで詳しく見られる。", demo: "route" },
-    { t: "熱ゲージ", b: "歩くと熱がたまる（1ルートで歩くほど1歩の熱が増える）。反撃・攻撃予告・夜の圧でも熱が上がり、100で燃え尽きる。熱いほど攻撃ダメージと仲間のゲージに倍率がかかる（熱100で×2）。敵を倒す・夜風・焚き火で、今の熱の何割かが下がる。熱は戦闘をまたいで残る。", demo: "heat" },
+    { t: "熱ゲージ", b: "熱が移動力。1歩ごとに、100までの残りの何%かがたまる（1ルートで歩くほど%が上がる）。反撃・攻撃予告・夜の圧は固定値で熱を上げ、100で燃え尽きる。熱いほど攻撃と仲間のゲージに倍率（熱100で×2）。敵を倒す・焚き火で、今の熱の何割かが下がる。熱は戦闘をまたいで残る。", demo: "heat" },
     { t: "敵を切り抜ける", b: "道の途中に敵がいれば、通り抜けざまに斬る。倒しきれなかった敵は進行方向へ2マス押し出される。終点は空きマスで。", demo: "attack" },
     { t: "ウィークサイド", b: "盾に囲まれていない光る側面が弱点。矢印の方向からまっすぐ突っ込むと大ダメージ。", demo: "weak" },
     { t: "反撃", b: "盾のある側から上下左右にまっすぐ斬って、倒しきれないと反撃を受け、熱が大きく上がる。斜めから斬れば反撃されない（弱点ボーナスもなし）。", demo: "guard" },
@@ -1786,11 +1840,11 @@
     { t: "押し出しともつれ", b: "押された敵が壁・岩・足跡・敵にぶつかると衝突ダメージ（残り移動が多いほど強い）を受け「もつれ」る。もつれた敵は反撃せず、斬れば弱点ダメージ（斬るとほどける）。敵同士は同じマスに重なる。同じ敵を2回目以降に斬ると押すだけ。", demo: "push" },
     { t: "岩", b: "岩はマスごと塞ぐが、岩と岩の斜めのすき間は通れる。押された敵は岩や盤面の端にぶつかって止まり、もつれる。", demo: "wall" },
     { t: "攻撃予告", b: "骨砕きとボスは、次の敵ターンに攻撃するマスを黄色く予告する。そこで終わると被弾。押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
-    { t: "撃破で移動回復", b: "敵を倒すと移動力が回復し、熱も下がる（1ルートで最初の撃破は移動+2、2体目からは+1）。倒して、進んで、また倒す。", demo: "chain" },
+    { t: "撃破で熱が下がる", b: "敵を倒すと、今の熱の25%が下がる（同じルートの2体目からは少し減る）。熱が下がればまた歩ける。倒して、進んで、また倒す。", demo: "chain" },
     { t: "燠火の足跡", b: "歩いたマスは燃えて、しばらく入れない。斜めに交差するのはOK。敵がいたマスは燃えないので、もう一度踏み込める。仲間が増えるほど足跡は長く残る。", demo: "ember" },
-    { t: "夜の圧", b: "ターン終了時、生き残った敵の圧（紫の炎）1につき熱+3、そのあと夜風で今の熱の2割が冷える。圧で100に届けば燃え尽きる。触れなかった敵は、次のターンから圧が+1ずつ溜まっていく。", demo: "pressure" },
+    { t: "夜の圧", b: "ターン終了時、生き残った敵の圧（紫の炎）1につき熱が上がる（画面下のゲージに薄く予告）。圧で100に届けば燃え尽きる。触れなかった敵は、次のターンから圧が+1ずつ溜まっていく。", demo: "pressure" },
     { t: "戦闘目標", b: "右上の2つの札は、この戦闘の目標と報酬。達成して勝つと、その報酬がもらえる。欲しいものがあれば狙ってみよう。", demo: "route" },
-    { t: "仲間の力", b: "仲間のゲージは、ルートが条件の形（直進・直角・輪…）を満たすたびと、1歩ごとにたまる。熱いほど早い。満タンでターンを始めた仲間は、ルートを描いたあとカードをタップすると、ルートの先端で能力を撃つ。", demo: "comp" },
+    { t: "仲間の力", b: "仲間のゲージは、ルートが条件の形（直進・直角・輪…）を満たすたびと、1歩ごとにたまる。熱いほど早い。満タンになったら、そこまでルートを描いてカードをタップ → ルートの先端で能力を撃つ。ゲージは戦闘ごとにリセット。", demo: "comp" },
   ];
   class HelpView extends ModalBase {
     constructor() {
@@ -1847,7 +1901,7 @@
         A.text(ctx, String(hv), bx - 8, by + 4, { s: 2, align: "right", color: C.cream });
         A.spr(ctx, "kai", 180, 176, { s: 2, white: hv > 85 ? 0.3 : 0 });
         A.jp(ctx, "歩く・被弾・夜の圧 → 熱↑", 180, 270, { size: 12, align: "center", color: "#ff8f6a" });
-        A.jp(ctx, "撃破・夜風・焚き火 → 熱↓", 180, 292, { size: 12, align: "center", color: C.move });
+        A.jp(ctx, "撃破・焚き火 → 熱↓", 180, 292, { size: 12, align: "center", color: C.move });
       }
       const fl = Math.floor(t / 200) % 2;
       if (kind === "guard") {
