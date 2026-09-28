@@ -1,0 +1,1714 @@
+/* EMBERLINE — Mediator: the single state machine that judges every input/UI
+   event, drives game logic, and tells passive views what to show.
+   Logic facts (events from EL.Logic) → Mediator → view commands/audio/camera. */
+(function (EL) {
+  "use strict";
+  const U = EL.U, D = EL.Data, L = EL.Logic, V = EL.V, A = EL.Art, C = A.C, S = EL.Audio;
+  const tc = V.tc;
+  const feet = (t) => { const c = tc(t.x, t.y); return { x: c.x, y: c.y + 18 }; };
+  const sameTile = (a, b) => a && b && a.x === b.x && a.y === b.y;
+
+  class Mediator {
+    constructor(v, camera) {
+      this.v = v; this.cam = camera;
+      this.state = null; this.run = null; this.B = null;
+      this.busy = false; this.paused = false; this.helpReturn = null;
+      this.enemyViews = {}; this.compViews = []; this.path = [];
+      this.route = null; this.preview = null; this.chain = 0;
+      this.toastTimer = null; this.quitArmed = false;
+      this.record = this.loadRecord();
+    }
+
+    /* ---------- state machine core ---------- */
+    go(name, arg) {
+      const prev = STATES[this.state];
+      if (prev && prev.exit) prev.exit.call(this, name);
+      this.state = name;
+      const s = STATES[name];
+      if (s && s.enter) s.enter.call(this, arg);
+    }
+    dispatch(evt) {
+      const t = evt.type, d = evt.data;
+      if (t === "ui.press") { if (!this.busy) S.play("tap"); return; }
+      if (this.busy) return;
+      if (this.paused) return this.pauseHandle(evt);
+      if (this.v.help.visible) return this.helpHandle(evt);
+      if (t === "ui.click") {
+        if (d.id === "pause") { if (["Map", "Battle.Idle", "Battle.Planned"].includes(this.state)) this.openPause(); return; }
+        if (d.id === "relic") { this.toastRelic(d.relic); return; }
+        if (d.id === "comp") { const c = evt.source.comp; if (c) this.compTap(c); return; }
+        if (d.id === "objective") { this.toastObjective(d.index); return; }
+      }
+      const s = STATES[this.state];
+      if (s && s.on) s.on.call(this, evt);
+    }
+
+    /* ---------- shared helpers ---------- */
+    hideToast() { clearTimeout(this.toastTimer); EL.tweens.kill(this.v.toast); this.v.toast.alpha = 0; }
+    async wipe(fn, color) {
+      this.busy = true;
+      this.hideToast();
+      const w = this.v.wipe;
+      w.color = color || "#07050d";
+      S.play("whoosh");
+      await EL.tween(w, { p: 1 }, 320, { clock: "ui", ease: U.ease.inQuad });
+      await fn();
+      await EL.wait(80, "ui");
+      await EL.tween(w, { p: 0 }, 360, { clock: "ui", ease: U.ease.outQuad });
+      this.busy = false;
+    }
+    showOnly(names) {
+      const v = this.v;
+      if (names.length) this.hideToast();
+      for (const k of ["title", "charSelect", "reward", "choice", "pause", "help", "result"]) v[k].visible = names.includes(k);
+    }
+    setHud(mode) {
+      const v = this.v;
+      const battle = mode === "battle", map = mode === "map";
+      v.hudLayer.visible = battle || map;
+      v.moveHUD.visible = v.pressureHUD.visible = battle;
+      v.objHUD.visible = battle;
+      v.companionHUD.visible = battle;
+      v.pauseBtn.visible = battle || map;
+      v.turnHUD.showTurn = battle;
+      v.hint.visible = battle;
+      v.battleWorld.visible = battle;
+      v.mapView.visible = map;
+      v.worldLayer.enabled = battle; // HD-2D tilt + lighting only on the battlefield
+      v.postfx.visible = battle;
+    }
+    hint(text) { this.v.hint.text = text; this.v.hint.t = 0; }
+    toast(title, body, icon, ms) {
+      const t = this.v.toast;
+      t.title = title; t.body = body; t.icon = icon || null;
+      EL.tweens.kill(t);
+      t.alpha = 0; t.y = 400;
+      EL.tween(t, { alpha: 1, y: 386 }, 160, { clock: "ui" });
+      clearTimeout(this.toastTimer);
+      this.toastTimer = setTimeout(() => EL.tween(t, { alpha: 0 }, 250, { clock: "ui" }), ms || 2400);
+    }
+    toastRelic(id) { const r = D.RELICS[id]; S.play("hover"); this.toast(r.name, r.desc, r.icon); }
+    toastComp(id) {
+      const c = D.COMPANIONS[id]; S.play("hover");
+      const g = Math.round(this.run ? this.run.charge[id] || 0 : 0);
+      this.toast(`${c.name}「${c.skill}」 ${g}%`, `ゲージ：${c.condLong}（+${c.charge[0]}）・1歩ごと+${c.charge[1]}\n熱が高いほど早くたまる。満タンでターンを始めると撃てる\n効果：${c.skillText}`, null, 3600);
+    }
+    /* tapping a companion: fire it at the tip of the planned route (tap again to cancel) */
+    compTap(id) {
+      const planning = this.state === "Battle.Planned" && this.route && this.route.length > 1;
+      const ready = planning ? this.preview && this.preview.T.ready.has(id) || this.armedAt(id) >= 0 : (this.run.charge[id] || 0) >= 100;
+      if (!["Battle.Idle", "Battle.Planned"].includes(this.state) || !ready) { this.toastComp(id); return; }
+      if (!planning) { S.play("invalid"); this.hint("ルートを描いて、撃ちたいマスで仲間をタップ"); return; }
+      const r = this.route, tip = r[r.length - 1], at = this.armedAt(id);
+      if (at >= 0) r[at] = Object.assign({}, r[at], { fire: [].concat(r[at].fire).filter((c) => c !== id) });
+      if (at !== r.length - 1) { r[r.length - 1] = Object.assign({}, tip, { fire: [].concat(r[r.length - 1].fire || [], id) }); S.play("skillReady"); }
+      else S.play("cancel");
+      this.updatePreview();
+    }
+    armedAt(id) { return this.route ? this.route.findIndex((t) => t.fire && [].concat(t.fire).includes(id)) : -1; }
+    /* what the night will do to a hero with margin hp: strikes, pressure, then the cooling */
+    nightOf(hp, enemies, tele, movesLeft) {
+      const run = this.run, B = this.B;
+      const teleHeat = L.hitHeat(run, tele || 0);
+      let P = L.pressureOf(run, B, enemies);
+      if (L.has(run, "afterglow")) P = Math.max(0, P - Math.max(0, movesLeft || 0));
+      const h1 = hp - teleHeat, press = h1 > 0 ? L.pressHeat(h1, P) : 0, h2 = h1 - press;
+      return { teleHeat, press, cool: h2 > 0 ? L.coolOf(h2) : 0, heat: L.heatOf(h2) };
+    }
+    idleNight() {
+      const v = this.v, B = this.B, run = this.run;
+      if (!B) return;
+      const n = this.nightOf(run.hp, B.enemies, L.teleDmgAt(B, B.enemies, B.hero.x, B.hero.y), 0);
+      v.pressureHUD.value = n.press; v.pressureHUD.tele = n.teleHeat; v.pressureHUD.cool = n.cool;
+      v.pressureHUD.prev = null; v.pressureHUD.telePrev = null; v.pressureHUD.coolPrev = null;
+      v.playerHUD.night = n.heat;
+    }
+    resetCards(planning) {
+      const run = this.run;
+      this.v.companionHUD.cards.forEach((c) => {
+        if (!c.comp) return;
+        c.charge = run.charge[c.comp] || 0; c.prev = null; c.gain = 0;
+        c.ready = c.charge >= 100; c.armed = null; c.fired = false; c.planning = !!planning;
+      });
+    }
+    refreshRunHud() {
+      const v = this.v, run = this.run;
+      const h = D.HEROES[run.heroId];
+      v.playerHUD.sprite = h.sprite; v.playerHUD.name = `${h.name}`;
+      v.playerHUD.hp = run.hp; v.playerHUD.maxHp = run.maxHp; v.playerHUD.prev = null;
+      v.relicHUD.setRelics(run.relics);
+      v.companionHUD.cards.forEach((c, i) => { c.comp = run.companions[i] || null; });
+      this.resetCards(false);
+    }
+    emptyT() { return { dirs: [], kills: 0, dmgTaken: 0, weakHits: 0, tangles: 0, route: [{ x: 0, y: 0 }], marks: {}, uses: {} }; }
+    floorText() {
+      if (!this.run.nodeId) return "入口";
+      const n = this.run.map.nodes[this.run.nodeId];
+      return n.type === "boss" ? "最深部" : `第${n.row + 1}層`;
+    }
+    loadRecord() { try { return JSON.parse(localStorage.getItem("emberline.record") || "{}"); } catch (_) { return {}; } }
+    saveRecord() { try { localStorage.setItem("emberline.record", JSON.stringify(this.record)); } catch (_) {} }
+
+    /* ---------- pause / help ---------- */
+    openPause() {
+      this.paused = true; EL.Time.paused = true; this.quitArmed = false;
+      const p = this.v.pause;
+      p.quit.label = "ランをあきらめる";
+      p.bgm.label = "BGM：" + (S.settings.bgm ? "ON" : "OFF");
+      p.sfx.label = "効果音：" + (S.settings.sfx ? "ON" : "OFF");
+      p.visible = true; p.alpha = 0;
+      EL.tween(p, { alpha: 1 }, 160, { clock: "ui" });
+    }
+    closePause() { this.paused = false; EL.Time.paused = false; this.v.pause.visible = false; }
+    pauseHandle(evt) {
+      if (this.v.help.visible) return this.helpHandle(evt);
+      if (evt.type !== "ui.click") return;
+      const p = this.v.pause;
+      switch (evt.data.id) {
+        case "pause.resume": this.closePause(); break;
+        case "pause.bgm": S.setBgm(!S.settings.bgm); p.bgm.label = "BGM：" + (S.settings.bgm ? "ON" : "OFF"); break;
+        case "pause.sfx": S.setSfx(!S.settings.sfx); p.sfx.label = "効果音：" + (S.settings.sfx ? "ON" : "OFF"); break;
+        case "pause.help": this.openHelp(); break;
+        case "pause.quit":
+          if (!this.quitArmed) { this.quitArmed = true; p.quit.label = "本当に？（もう一度）"; break; }
+          this.closePause();
+          this.wipe(async () => { this.go("Title"); });
+          break;
+      }
+    }
+    openHelp() { const h = this.v.help; h.page = 0; h.visible = true; h.alpha = 0; this.syncHelp(); EL.tween(h, { alpha: 1 }, 160, { clock: "ui" }); }
+    syncHelp() { const h = this.v.help; h.prev.disabled = h.page === 0; h.next.disabled = h.page === h.pages.length - 1; }
+    helpHandle(evt) {
+      if (evt.type !== "ui.click") return;
+      const h = this.v.help;
+      if (evt.data.id === "help.prev") { h.page = Math.max(0, h.page - 1); h.t = 0; }
+      if (evt.data.id === "help.next") { h.page = Math.min(h.pages.length - 1, h.page + 1); h.t = 0; }
+      if (evt.data.id === "help.close") { h.visible = false; }
+      this.syncHelp();
+    }
+
+    /* ================= battle presentation ================= */
+    setupBattle() {
+      const v = this.v, B = this.B, run = this.run;
+      v.board.tiles = B.tiles;
+      v.board.loc = B.loc || "temple";
+      v.route.heroSprite = D.HEROES[run.heroId].sprite;
+      v.footprints.trail = B.trail.map((t) => ({ x: t.x, y: t.y }));
+      v.footprints.births.clear(); v.footprints.ashes = [];
+      v.route.pts = []; v.route.skillMarks = []; v.route.areas = [];
+      v.enemies.clear(); this.enemyViews = {};
+      for (const e of B.enemies) this.addEnemyView(e);
+      this.refreshEnemyStatics();
+      v.units.clear();
+      this.path = B.trail.map((t) => ({ x: t.x, y: t.y }));
+      this.compViews = run.companions.map((c, i) => {
+        const u = v.units.add(new V.UnitView("Companion:" + c, D.COMPANIONS[c].sprite));
+        const p = feet(B.hero);
+        u.x = p.x - 10 - i * 6; u.y = p.y - 2; u.t = i * 300;
+        return u;
+      });
+      const hero = (v.hero = v.units.add(new V.UnitView("Player", D.HEROES[run.heroId].sprite)));
+      hero.lantern = true;
+      const p = feet(B.hero);
+      hero.x = p.x; hero.y = p.y;
+      v.fx.ps = []; v.fx.prims = [];
+      v.combo.chain = 0; v.combo.alpha = 0;
+      v.turnHUD.turn = B.turn; v.turnHUD.floor = this.floorText();
+      v.objHUD.setObjectives(B.objectives);
+      v.board.starts = B.startLocked ? [] : (B.starts || []).slice();
+      this.refreshBoardMarks();
+      this.coolPreview();
+    }
+    /* opening: until the first route runs, the hero may start from any candidate spot */
+    startOpen() { return this.B && !this.B.startLocked && this.B.starts && this.B.starts.length > 1; }
+    startAt(d) {
+      if (!this.startOpen()) return null;
+      return this.B.starts.find((s) => { const c = tc(s.x, s.y); return (d.tile && sameTile(d.tile, s)) || Math.hypot(d.px - c.x, d.py - c.y) < V.GEO.T * 0.7; }) || null;
+    }
+    moveStart(s) {
+      const v = this.v, B = this.B;
+      if (sameTile(s, B.hero)) return;
+      B.hero = { x: s.x, y: s.y };
+      B.trail = [{ x: s.x, y: s.y }];
+      this.path = [{ x: s.x, y: s.y }];
+      v.footprints.trail = [{ x: s.x, y: s.y }];
+      v.board.heroTile = { x: s.x, y: s.y };
+      const p = feet(s);
+      v.hero.x = p.x; v.hero.y = p.y; v.hero.hop = 6; EL.tween(v.hero, { hop: 0 }, 160, { clock: "ui", ease: U.ease.outQuad });
+      this.compViews.forEach((u, i) => { u.x = p.x - 10 - i * 6; u.y = p.y - 2; });
+      v.fx.burst(p.x, p.y - 8, 10, { speed: [30, 100], life: [200, 400], palette: [C.emberL, C.ember], size: 2, glow: true, ay: -60 });
+      L.planTelegraphs(B);
+      this.refreshBoardMarks();
+      this.resetTurnHud();
+      this.coolPreview();
+      S.play("step", 1);
+    }
+    /* guard zones + announced strikes for a given enemy state (default: the battle's truth) */
+    refreshBoardMarks(enemies, heroEnd) {
+      const B = this.B, bd = this.v.board;
+      enemies = enemies || B.enemies;
+      bd.teles = [];
+      for (const e of enemies) if (e.alive) for (const t of L.teleTiles(B, e)) bd.teles.push({ x: t.x, y: t.y, dmg: e.tele.dmg, uid: e.uid });
+      bd.seals = enemies.filter((e) => e.alive && e.type === "totem").map((t) => ({ x: t.x, y: t.y, r: D.BAL.sealRange }));
+      bd.heroEnd = heroEnd || B.hero;
+    }
+    /* enemies sharing a tile (a tangle) fan out a little so each stays readable */
+    layoutStacks() {
+      const groups = {};
+      for (const k in this.enemyViews) {
+        const ev = this.enemyViews[k];
+        if (ev.dead) continue;
+        const key = Math.round(ev.tx) + "," + Math.round(ev.ty);
+        (groups[key] = groups[key] || []).push(ev);
+      }
+      for (const key in groups) {
+        const g = groups[key], n = g.length;
+        g.forEach((ev, i) => {
+          const sox = n > 1 ? (i - (n - 1) / 2) * 12 : 0, soy = n > 1 ? -i * 4 : 0;
+          EL.tween(ev, { sox, soy }, 180, { clock: "ui", ease: U.ease.outBack });
+        });
+      }
+    }
+    /* ward pillars during choreography: seal/unseal from what is on screen right now */
+    liveSeals() {
+      const list = Object.values(this.enemyViews).filter((w) => !w.dead).map((w) => ({ x: Math.round(w.tx), y: Math.round(w.ty), type: w.type, boss: w.boss, alive: true }));
+      for (const w of Object.values(this.enemyViews)) {
+        if (w.dead) continue;
+        const s = L.sealedBy(list, { x: Math.round(w.tx), y: Math.round(w.ty), type: w.type, boss: w.boss });
+        if (s === w.sealed) continue;
+        w.sealed = s; w.spin = 0; EL.tween(w, { spin: 1 }, 320);
+        const r = w.rect();
+        this.v.floats.spawn(s ? "封印" : "弱点復活", r.x + r.s / 2, r.y - 8, { kind: "jp", color: s ? "#c9b3ff" : C.emberL, life: 800, vy: -30 });
+        if (!s) this.v.fx.burst(r.x + r.s / 2, r.y + r.s / 2, 14, { speed: [40, 140], life: [250, 500], palette: [C.weak, C.emberL, "#c9b3ff"], size: 2, glow: true });
+      }
+      this.v.board.seals = list.filter((e) => e.type === "totem").map((t) => ({ x: t.x, y: t.y, r: D.BAL.sealRange }));
+    }
+    objectiveStates() { return this.B.objectives.map((o) => L.objectiveState(this.B, o, false)); }
+    rewardName(r) {
+      if (r.kind === "relic") return D.RELICS[r.id].name;
+      if (r.kind === "comp") return D.COMPANIONS[r.id].name + "（仲間）";
+      return "熱−" + r.amount;
+    }
+    toastObjective(i) {
+      if (!this.B || !this.B.objectives[i]) return;
+      const o = this.B.objectives[i], info = D.OBJECTIVES[o.id], r = o.reward;
+      const st = L.objectiveState(this.B, o, false);
+      const tail = st === "done" ? "（達成済み）" : st === "failed" ? "（失敗）" : "";
+      const rdesc = r.kind === "relic" ? D.RELICS[r.id].desc : r.kind === "comp" ? D.COMPANIONS[r.id].skill + "：" + D.COMPANIONS[r.id].skillText : "熱が下がる";
+      this.toast(`目標：${info.label}${tail}`, `${info.desc}\n報酬：${this.rewardName(r)}\n${rdesc}`, r.kind === "relic" ? D.RELICS[r.id].icon : null);
+      S.play("hover");
+    }
+    addEnemyView(e) {
+      const ev = this.v.enemies.add(new V.EnemyView(e));
+      ev.flip = e.weak === "L";
+      this.enemyViews[e.uid] = ev;
+      return ev;
+    }
+    refreshEnemyStatics() {
+      const B = this.B;
+      for (const e of B.enemies) {
+        const ev = this.enemyViews[e.uid];
+        if (!ev) continue;
+        ev.sealed = L.sealedBy(B.enemies, e);
+        ev.weak = e.weak; ev.hp = e.hp; ev.phase2 = e.boss && B.phase2;
+        ev.pressure = L.enemyPressure(this.run, B, e);
+        ev.grow = e.grow || 0;
+        ev.flip = e.weak === "L";
+        ev.tangled = !!e.tangled;
+        ev.tx = e.x; ev.ty = e.y;
+      }
+      this.layoutStacks();
+    }
+    /* tiles that will cool at the end of this turn if no more are added */
+    coolPreview(extra) {
+      const n = this.v.footprints.trail.length + (extra || 0);
+      this.v.footprints.cool = L.coolCount(this.run, n);
+    }
+    clearTargets() {
+      for (const k in this.enemyViews) {
+        const ev = this.enemyViews[k];
+        ev.target = false; ev.kill = false; ev.dmg = null; ev.guardDmg = null; ev.blocked = false; ev.dmgWeak = false; ev.pushOnly = false; ev.willGrow = false;
+      }
+    }
+    resetTurnHud() {
+      const v = this.v, run = this.run, B = this.B;
+      const S0 = L.stats(run);
+      v.moveHUD.moves = S0.mov; v.moveHUD.max = S0.mov; v.moveHUD.prev = null;
+      v.playerHUD.hp = run.hp; v.playerHUD.maxHp = run.maxHp; v.playerHUD.prev = null;
+      this.idleNight();
+      this.resetCards(false);
+    }
+
+    /* ---------- route drawing ---------- */
+    beginRoute() {
+      this.route = [{ x: this.B.hero.x, y: this.B.hero.y }];
+      this.lastKills = 0; this.lastSkills = 0; this.lastAttacks = 0;
+      this.updatePreview(true);
+    }
+    tryExtend(tile) {
+      const B = this.B, run = this.run;
+      const r = this.route;
+      const lastT = r[r.length - 1];
+      if (sameTile(tile, lastT)) return;
+      // finger back onto the route = undo to there, except onto a tile that did not burn
+      // (an enemy's tile) further back: that is a legal step forward
+      let back = -1;
+      for (let k = r.length - 1; k >= 0; k--) if (sameTile(r[k], tile)) { back = k; break; }
+      const cold = this.preview && this.preview.T.cold.has(L.idx(B, tile.x, tile.y));
+      if (back >= 0 && cold && back < r.length - 2) back = -1;
+      if (back >= 0) {
+        this.route = r.slice(0, back + 1);
+        S.play("stepBack");
+        this.updatePreview();
+        return;
+      }
+      // walk toward the finger one tile at a time (handles fast swipes)
+      let added = 0, err = "";
+      for (let guard = 0; guard < 12; guard++) {
+        const cur = this.route[this.route.length - 1];
+        if (sameTile(cur, tile)) break;
+        if (this.preview && this.preview.outcome !== "ok") { err = "done"; break; }
+        const next = { x: cur.x + U.sign(tile.x - cur.x), y: cur.y + U.sign(tile.y - cur.y) };
+        const moves = this.preview ? this.preview.T.moves : L.stats(run).mov;
+        err = L.stepError(B, L.blockedSet(B, this.route, this.preview && this.preview.T.cold), moves, cur, next);
+        if (err) break;
+        this.route.push(next);
+        added++;
+        this.preview = L.simulate(B, run, this.route);
+      }
+      if (added) { S.play("step", this.route.length - 1); this.updatePreview(); }
+      if (err && err !== "done" && err !== "far") {
+        const cur = this.route[this.route.length - 1];
+        const nx = { x: cur.x + U.sign(tile.x - cur.x), y: cur.y + U.sign(tile.y - cur.y) };
+        if (!this.lastBad || !sameTile(this.lastBad, nx) || EL.Time.ui - this.lastBadT > 400) {
+          this.v.route.bad = { x: nx.x, y: nx.y, t: this.v.route.t };
+          this.lastBad = nx; this.lastBadT = EL.Time.ui;
+          S.play("invalid");
+          if (err === "moves") this.hint("移動力が足りない — 撃破で回復する");
+          else if (err === "ember") this.hint("燃えている足跡には入れない（斜めの交差はOK）");
+        }
+      }
+    }
+    updatePreview(first) {
+      const B = this.B, run = this.run, v = this.v;
+      const res = (this.preview = L.simulate(B, run, this.route));
+      const rt = v.route;
+      rt.pts = this.route.slice(); rt.consumed = 0;
+      rt.endMoves = res.T.moves; rt.endOk = !res.endBlocked; rt.dead = res.outcome === "dead";
+      // enemies: predicted damage / kills / counters
+      this.clearTargets();
+      const alivePred = {};
+      for (const e of res.st.enemies) alivePred[e.uid] = e;
+      const refundOf = {};
+      for (const e of res.events) if (e.type === "kill") refundOf[e.uid] = e.refund;
+      let kills = 0, attacks = 0, skills = 0;
+      for (const e of B.enemies) {
+        const ev = this.enemyViews[e.uid], p = alivePred[e.uid];
+        if (!ev || !p) continue;
+        const dmg = e.hp - Math.max(0, p.hp);
+        if (dmg > 0 || !p.alive) { ev.target = true; ev.dmg = dmg; ev.kill = !p.alive; ev.refund = !p.alive ? refundOf[e.uid] || 0 : 0; }
+        if (!p.alive) kills++;
+        ev.willGrow = p.alive && !res.T.touched.has(e.uid) && this.route.length > 1;
+      }
+      rt.skillMarks = []; rt.areas = []; rt.pushes = []; rt.guardHits = []; rt.chargeMarks = [];
+      let guardDmg = 0;
+      for (const st of res.steps) {
+        for (const at of st.attacks) {
+          attacks++;
+          const ev = this.enemyViews[at.uid];
+          if (ev) { ev.dmgWeak = ev.dmgWeak || at.weak; if (at.pushOnly) { ev.pushOnly = true; ev.target = true; if (ev.dmg == null) ev.dmg = 0; } }
+        }
+        for (const g of st.guards) {
+          const ev = this.enemyViews[g.uid];
+          if (g.blocked) { if (ev) ev.blocked = true; rt.guardHits.push({ x: st.tile.x, y: st.tile.y, blocked: true }); continue; }
+          guardDmg += L.hitHeat(run, g.dmg);
+          if (ev) ev.guardDmg = (ev.guardDmg || 0) + L.hitHeat(run, g.dmg);
+          rt.guardHits.push({ x: st.tile.x, y: st.tile.y, dmg: L.hitHeat(run, g.dmg) });
+        }
+        for (const pu of st.pushes) rt.pushes.push(pu);
+        for (const c of st.charged) rt.chargeMarks.push({ x: st.tile.x, y: st.tile.y, color: D.COMPANIONS[c].color });
+        for (const sk of st.skills) {
+          skills++;
+          rt.skillMarks.push({ x: st.tile.x, y: st.tile.y, comp: sk.comp, color: D.COMPANIONS[sk.comp].color, k: skills });
+          if (sk.effect === "burst") rt.areas.push({ kind: "burst", tiles: sk.data.area });
+          if (sk.effect === "ring") rt.areas.push({ kind: "ring", poly: sk.data.poly });
+          if (sk.effect === "pierce") rt.areas.push({ kind: "pierce", from: sk.data.from, to: sk.data.target ? this.enemyTile(sk.data.target) : { x: sk.data.to.x - sk.data.dir[0], y: sk.data.to.y - sk.data.dir[1] } });
+        }
+      }
+      // HUD previews
+      v.moveHUD.prev = res.T.moves;
+      v.playerHUD.prev = res.T.hp !== run.hp ? res.T.hp : null;
+      const night = this.nightOf(res.T.hp, res.st.enemies.filter((e) => e.alive), res.teleEnd, res.T.moves);
+      v.pressureHUD.prev = night.press; v.pressureHUD.telePrev = night.teleHeat; v.pressureHUD.coolPrev = night.cool;
+      v.playerHUD.night = res.outcome === "ok" ? night.heat : null;
+      rt.teleEnd = night.teleHeat;
+      this.refreshBoardMarks(res.st.enemies, res.end);
+      let readyIdle = false;
+      v.companionHUD.cards.forEach((c) => {
+        if (!c.comp) return;
+        const start = run.charge[c.comp] || 0, end = res.T.charge[c.comp] || 0;
+        const fire = res.T.fired.find((f) => f.comp === c.comp);
+        const wasArmed = c.armed;
+        c.planning = true; c.charge = start; c.prev = end;
+        c.gain = end > start ? Math.round(end - start) : 0;
+        c.ready = start >= 100 || res.T.ready.has(c.comp) || !!fire;
+        c.armed = fire ? fire.i : null; c.fired = false;
+        if (c.ready && !fire && this.route.length > 1) readyIdle = true;
+        if (c.armed != null && wasArmed == null) { c.bounce = 1; EL.tween(c, { bounce: 0 }, 300, { clock: "ui", ease: U.ease.outBack }); }
+      });
+      // reachable tiles & weak-side approach pads
+      const blocked = L.blockedSet(B, this.route, res.T.cold);
+      const end = this.route[this.route.length - 1];
+      v.board.reach = res.outcome === "ok" ? L.reachable(B, blocked, end, res.T.moves) : new Set();
+      const pads = [];
+      for (const e of res.st.enemies) {
+        if (!e.alive || L.sealedBy(res.st.enemies, e)) continue;
+        for (const t of L.weakEntries(B, res.st.enemies, e)) {
+          if (!blocked.has(L.idx(B, t.x, t.y)) && !L.enemyAt(res.st.enemies, t.x, t.y)) pads.push(t);
+        }
+      }
+      v.board.entries = pads;
+      this.coolPreview(this.route.length - 1);
+      // audio cues when the plan changes
+      if (!first) {
+        if (kills > this.lastKills) S.play("killPreview", kills);
+        else if (attacks > this.lastAttacks) S.play("lock");
+        if (skills > this.lastSkills) S.play("skillReady");
+      }
+      this.lastKills = kills; this.lastAttacks = attacks; this.lastSkills = skills;
+      // contextual hint
+      if (res.outcome === "dead") this.hint("このルートでは燃え尽きる！");
+      else if (night.heat >= 100 && res.outcome === "ok") this.hint("このままでは夜に燃え尽きる！");
+      else if (res.endBlocked) this.hint("敵のマスでは止まれない");
+      else if (res.outcome === "victory") this.hint("このルートで全滅できる！");
+      else if (res.teleEnd > 0) this.hint(`終点に攻撃予告！ 熱+${night.teleHeat}`);
+      else if (res.T.tangles > 0 && !kills) this.hint("もつれた！ 斬れば弱点ダメージ（斬るとほどける）");
+      else if (guardDmg > 0) this.hint(`反撃 熱+${guardDmg} — 弱点か斜めから斬れば反撃されない`);
+      else if (skills) this.hint("仲間の能力が発動する！");
+      else if (readyIdle) this.hint("光る仲間をタップ → ルートの先端で能力を撃つ");
+      else if (kills) this.hint(kills === 1 ? `撃破で移動+${L.stats(run).refund} — まだ伸ばせる` : "2体目以降の撃破は移動+1 — 目標を見極めて");
+      else if (this.route.length > 1) this.hint("指を離して、出撃ボタンで実行");
+      else this.hint("光る側面からまっすぐ突っ込め");
+    }
+    /* tap-to-move: extend the route from its tip to `tile` (straight first, else the shortest legal detour) */
+    routeTo(tile) {
+      const B = this.B, r = this.route;
+      if (r.some((t) => sameTile(t, tile))) { this.tryExtend(tile); return; } // tapping the route rewinds it
+      const snapshot = r.slice();
+      this.tryExtend(tile);
+      if (sameTile(this.route[this.route.length - 1], tile)) return;
+      // the straight walk got stuck: search a detour around embers and rocks
+      this.route = snapshot; this.preview = L.simulate(B, this.run, this.route);
+      const start = this.route[this.route.length - 1];
+      const blocked = L.blockedSet(B, this.route, this.preview.T.cold);
+      const key = (t) => t.x + "," + t.y, prev = new Map([[key(start), null]]), q = [start];
+      const order = [[0, -1], [1, 0], [0, 1], [-1, 0], [1, -1], [1, 1], [-1, 1], [-1, -1]];
+      while (q.length && !prev.has(key(tile))) {
+        const c = q.shift();
+        for (const [dx, dy] of order) {
+          const n = { x: c.x + dx, y: c.y + dy };
+          if (prev.has(key(n)) || L.stepError(B, blocked, 99, c, n)) continue;
+          prev.set(key(n), c); q.push(n);
+        }
+      }
+      if (!prev.has(key(tile))) { this.tryExtend(tile); return; } // unreachable: show why
+      const path = [];
+      for (let t = tile; t && !sameTile(t, start); t = prev.get(key(t))) path.unshift(t);
+      let added = 0;
+      for (const n of path) {
+        if (this.preview.outcome !== "ok") break;
+        const cur = this.route[this.route.length - 1];
+        if (L.stepError(B, L.blockedSet(B, this.route, this.preview.T.cold), this.preview.T.moves, cur, n)) break;
+        this.route.push(n); added++;
+        this.preview = L.simulate(B, this.run, this.route);
+      }
+      if (added) { S.play("step", this.route.length - 1); this.updatePreview(); }
+      if (!sameTile(this.route[this.route.length - 1], tile)) { S.play("invalid"); this.hint("移動力が足りない — 撃破で回復する"); }
+    }
+    enemyInfo(e) {
+      const B = this.B, info = D.ENEMIES[e.type];
+      const wk = { U: "上", D: "下", L: "左", R: "右" }[e.weak];
+      const sealed = L.sealedBy(B.enemies, e);
+      const tele = e.tele && !e.tangled ? `・予告${e.tele.dmg}` : "";
+      this.toast(`${info.name}　HP${e.hp}/${e.maxHp}`, `反撃${e.atk}${tele}・圧${L.enemyPressure(this.run, B, e)}・弱点：${sealed ? "封印中" : wk + "側"}${e.tangled ? "・もつれ中" : ""}\n${info.desc}`);
+    }
+    /* a tap (short) plans a route; a long press on an enemy explains it */
+    tapPlan(d) {
+      const B = this.B;
+      if (!this.tapTile || !d.tile || !sameTile(this.tapTile, d.tile)) return;
+      const e = L.enemyAt(B.enemies, d.tile.x, d.tile.y);
+      if (EL.Time.ui - this.tapT > 420) { if (e) this.enemyInfo(e); return; }
+      if (sameTile(d.tile, B.hero) && this.state === "Battle.Idle") return;
+      if (this.state === "Battle.Idle") { this.beginRoute(); this.setDragUI(true); }
+      this.routeTo(d.tile);
+      this.finishRoute();
+    }
+    enemyTile(uid) { const e = this.B.enemies.find((x) => x.uid === uid); return e ? { x: e.x, y: e.y } : { x: 0, y: 0 }; }
+    setDragUI(on) {
+      const v = this.v;
+      EL.tween(v.board, { dim: on ? 1 : 0, entryEmph: on ? 1 : 0, guardEmph: on ? 1 : 0 }, 180, { clock: "ui" });
+      EL.tween(v.footprints, { alpha: on ? 0.55 : 1 }, 180, { clock: "ui" }); // old embers step back while planning
+      for (const k in this.enemyViews) EL.tween(this.enemyViews[k], { emph: on ? 1 : 0 }, 180, { clock: "ui" });
+      if (!on) {
+        v.board.entries = []; v.board.reach = null;
+        v.moveHUD.prev = null; v.playerHUD.prev = null;
+        v.route.pushes = []; v.route.guardHits = []; v.route.teleEnd = 0; v.route.chargeMarks = [];
+        if (this.run && this.B) { this.idleNight(); this.resetCards(false); }
+        this.clearTargets();
+        if (this.B) this.refreshBoardMarks();
+      }
+    }
+
+    /* ---------- execution: replay logic events as choreography ---------- */
+    async playRoute(route) {
+      const B = this.B, run = this.run, v = this.v;
+      const res = L.simulate(B, run, route);
+      v.route.pts = route.slice(0, res.last + 1); v.route.consumed = 0; v.route.skillMarks = []; v.route.areas = [];
+      v.route.pushes = []; v.route.guardHits = []; v.route.teleEnd = 0; v.route.chargeMarks = [];
+      v.board.teles = [];
+      this.clearTargets();
+      v.companionHUD.cards.forEach((c) => { c.prev = null; c.gain = 0; c.armed = null; c.planning = false; });
+      v.playerHUD.night = null;
+      this.chain = 0;
+      this.footN = 0;
+      this.deadSet = new Set();
+      const evs = res.events;
+      for (let i = 0; i < evs.length; i++) {
+        const ev = evs[i];
+        const nextEv = evs[i + 1];
+        const fn = this["ev_" + ev.type];
+        if (fn) await fn.call(this, ev, nextEv);
+      }
+      v.route.pts = []; v.route.consumed = 0;
+      v.companionHUD.cards.forEach((c) => { if (c.comp) { c.charge = res.T.charge[c.comp] || 0; c.ready = false; } });
+      return res;
+    }
+    unitTo(u, tile, dur, ease) {
+      const p = feet(tile);
+      if (p.x !== u.x) u.flip = p.x < u.x;
+      return EL.tween(u, { x: p.x, y: p.y }, dur, { ease: ease || U.ease.outQuad });
+    }
+    async ev_step(ev, next) {
+      const v = this.v;
+      const into = next && next.type === "attack";
+      const dur = into ? 80 : U.clamp(118 - this.chain * 8, 64, 118);
+      if (!ev.cold) {
+        v.footprints.trail.push({ x: ev.to.x, y: ev.to.y });
+        v.footprints.births.set(ev.to.x + "," + ev.to.y, v.footprints.t);
+      }
+      this.coolPreview();
+      this.path.push({ x: ev.to.x, y: ev.to.y });
+      v.route.consumed = ev.i;
+      v.moveHUD.moves = ev.moves;
+      if (ev.hp != null) v.playerHUD.hp = ev.hp;
+      const from = feet(ev.from);
+      v.fx.burst(from.x, from.y - 2, 4, { speed: [10, 40], life: [200, 400], palette: ["#6e3a2a", "#8a5a40"], size: 2, angle: -Math.PI / 2, spread: 2 });
+      S.play(into ? "dash" : "foot", this.footN++);
+      v.fx.burst(from.x, from.y - 4, into ? 8 : 3, { speed: [30, 110], life: [180, 420], palette: [C.emberL, C.ember], size: 2, glow: true, ay: -40, drag: 0.04 });
+      const hero = v.hero;
+      v.fx.ghost(hero.sprite, hero.x, hero.y, hero.flip);
+      if (this.chain >= 2) v.fx.ghost(hero.sprite, (hero.x + feet(ev.to).x) / 2, (hero.y + feet(ev.to).y) / 2, hero.flip);
+      hero.hop = 4; EL.tween(hero, { hop: 0 }, dur, { ease: U.ease.outQuad });
+      const tweens = [this.unitTo(hero, ev.to, dur, into ? U.ease.inQuad : U.ease.outQuad)];
+      const spots = this.companionSpots(ev.to);
+      this.compViews.forEach((u, i) => { if (spots[i]) tweens.push(this.unitTo(u, spots[i], dur)); });
+      await Promise.all(tweens);
+    }
+    async ev_attack(ev) {
+      const v = this.v, evw = this.enemyViews[ev.uid];
+      if (!evw) return;
+      if (ev.pushOnly) {
+        // follow-up on an enemy already struck this route: a shove, no blade damage
+        const p = ev.tile ? tc(ev.tile.x, ev.tile.y) : { x: evw.rect().x + 24, y: evw.rect().y + 24 };
+        evw.ox = U.sign(ev.dir[0]) * 6; evw.oy = U.sign(ev.dir[1]) * 6;
+        EL.tween(evw, { ox: 0, oy: 0 }, 180, { ease: U.ease.outBack });
+        v.fx.burst(p.x, p.y, 8, { angle: Math.atan2(ev.dir[1], ev.dir[0]), spread: 1.2, speed: [60, 160], life: [150, 320], palette: ["#d3dbea", C.cream], size: 2 });
+        v.floats.spawn("押す", p.x, p.y - 34, { kind: "jp", color: C.cream, life: 600, vy: -30 });
+        S.play("dash"); this.cam.shake(2, 100);
+        await EL.wait(50);
+        return;
+      }
+      const r = evw.rect();
+      const cx = r.x + r.s / 2, cy = r.y + r.s / 2;
+      const hitPoint = ev.tile ? tc(ev.tile.x, ev.tile.y) : { x: cx, y: cy };
+      const hx = hitPoint.x, hy = hitPoint.y;
+      v.fx.slash(hx, hy, ev.dir, ev.weak ? C.emberL : C.cream, ev.weak);
+      evw.flash = 1; EL.tween(evw, { flash: 0 }, 200);
+      evw.ox = U.sign(ev.dir[0]) * 8; evw.oy = U.sign(ev.dir[1]) * 8;
+      EL.tween(evw, { ox: 0, oy: 0 }, 220, { ease: U.ease.outBack });
+      evw.hp = ev.hp;
+      const ang = Math.atan2(ev.dir[1], ev.dir[0]);
+      v.fx.burst(hx, hy, ev.weak ? 30 : 14, { angle: ang, spread: 1.6, speed: [80, 300], life: [150, 420], palette: ev.weak ? ["#fff6df", "#ffd35a", "#ffb020", "#ff8a2a"] : ["#fff6df", "#d3dbea", "#ffd35a"], sizes: [2, 4], drag: 0.08, glow: true });
+      v.postfx.flashLight(hx, hy, ev.weak ? 170 : 100, ev.weak ? "255,190,80" : "255,240,220", ev.weak ? 1 : 0.7, ev.weak ? 320 : 200);
+      if (ev.weak) { v.fx.rays(hx, hy, 10, 56, C.emberL, 320); this.cam.punch(0.04, hx, hy); }
+      if (ev.weak) {
+        v.floats.spawn(ev.dmg, hx, hy - 30, { s: 4, color: C.weak, grad: "#ffffff", life: 900, vy: -80 });
+        v.floats.spawn(ev.forced ? "WEAK!!" : "WEAK!", hx, hy - 58, { s: 2, color: C.emberL, life: 800, vy: -50 });
+        // shield shards fly off the open flank
+        v.fx.burst(hx - ev.dir[0] * 16, hy - ev.dir[1] * 16, 12, { angle: ang + Math.PI, spread: 2.2, speed: [60, 180], life: [300, 600], palette: ["#7c86a3", "#d3dbea", "#3b3350"], size: 4, ay: 300 });
+        v.vignette.orange = 0.22; EL.tween(v.vignette, { orange: 0 }, 220, { clock: "ui" });
+        S.play("weak");
+        if (Math.random() < 0.5) S.voice(this.run.heroId);
+        EL.hitstop(115);
+        this.cam.shake(6, 220);
+      } else {
+        v.floats.spawn(ev.dmg, hx, hy - 30, { s: 3, color: C.cream, life: 750 });
+        if (ev.sealed) v.floats.spawn("封印", hx, hy - 54, { kind: "jp", color: "#c9b3ff", life: 700, vy: -30 });
+        if (ev.bonus) v.floats.spawn("+" + ev.bonus, hx + 22, hy - 44, { s: 2, color: C.move, life: 600, vy: -40 });
+        S.play("slash");
+        EL.hitstop(55);
+        this.cam.shake(3, 140);
+      }
+      await EL.wait(ev.weak ? 110 : 70);
+    }
+    async ev_guard(ev) {
+      const v = this.v, evw = this.enemyViews[ev.uid];
+      if (evw) {
+        const r = evw.rect();
+        const dx = U.sign(v.hero.x - (r.x + r.s / 2)), dy = U.sign(v.hero.y - 18 - (r.y + r.s / 2));
+        evw.ox = dx * 12; evw.oy = dy * 12;
+        EL.tween(evw, { ox: 0, oy: 0 }, 200, { ease: U.ease.outQuad });
+        v.fx.beam(r.x + r.s / 2, r.y + r.s / 2, v.hero.x, v.hero.y - 16, "#ff6a9a", 200);
+      }
+      await EL.wait(60);
+      const h = v.hero;
+      h.red = 1; EL.tween(h, { red: 0 }, 260);
+      h.ox = -6; EL.tween(h, { ox: 0 }, 220, { ease: U.ease.outElastic });
+      v.floats.spawn("熱+" + (ev.heat || ev.dmg), h.x, h.y - 50, { kind: "jp", color: "#ff6a4a", life: 800 });
+      v.floats.spawn("反撃", h.x, h.y - 76, { kind: "jp", color: "#ffb0c8", life: 700, vy: -30 });
+      v.fx.burst(h.x, h.y - 16, 14, { speed: [60, 200], life: [200, 420], palette: ["#ff4d5e", "#ff8f9b", "#8f2231"], size: 2, glow: true });
+      v.postfx.flashLight(h.x, h.y - 16, 120, "255,70,90", 0.9, 300);
+      v.playerHUD.hp = ev.hp; v.playerHUD.shake = 3; v.playerHUD.flash = 0.6;
+      EL.tween(v.playerHUD, { shake: 0, flash: 0 }, 300, { clock: "ui" });
+      v.vignette.red = 0.6; EL.tween(v.vignette, { red: 0 }, 380, { clock: "ui" });
+      S.play("counter"); S.voice(this.run.heroId, "hurt");
+      EL.hitstop(70);
+      this.cam.shake(5, 200);
+      await EL.wait(150);
+      this.refreshObjectives();
+    }
+    async ev_guardBlocked(ev) {
+      const v = this.v, h = v.hero;
+      h.shield = 1; EL.tween(h, { shield: 0 }, 380);
+      v.floats.spawn("BLOCK", h.x, h.y - 52, { s: 2, color: C.move, life: 700 });
+      S.play("block");
+      await EL.wait(110);
+    }
+    /* a survivor slides along the line of travel */
+    async ev_push(ev) {
+      const v = this.v, evw = this.enemyViews[ev.uid];
+      if (!evw) return;
+      if (!ev.path.length) { evw.ox = ev.dir[0] * 6; evw.oy = ev.dir[1] * 6; EL.tween(evw, { ox: 0, oy: 0 }, 160, { ease: U.ease.outBack }); await EL.wait(60); return; }
+      S.play("whoosh");
+      for (const t of ev.path) {
+        const r = evw.rect();
+        v.fx.burst(r.x + r.s / 2, r.y + r.s - 6, 6, { speed: [20, 70], life: [200, 420], palette: ["#8a7f86", "#5c5058", "#c9b3a0"], size: 2, angle: Math.atan2(-ev.dir[1], -ev.dir[0]), spread: 1.2 });
+        await EL.tween(evw, { tx: t.x, ty: t.y }, 70, { ease: U.ease.outQuad });
+      }
+      this.layoutStacks();
+      this.liveSeals();
+    }
+    async ev_untie(ev) {
+      for (const uid of ev.uids) {
+        const w = this.enemyViews[uid];
+        if (!w || w.dead) continue;
+        w.tangled = false;
+        const r = w.rect();
+        this.v.fx.burst(r.x + r.s / 2, r.y + r.s / 2, 8, { speed: [30, 100], life: [200, 400], palette: ["#b08cff", "#e9dcff"], size: 2 });
+      }
+      this.layoutStacks();
+    }
+    async ev_bump(ev) {
+      const v = this.v, evw = this.enemyViews[ev.uid];
+      if (!evw) return;
+      const r = evw.rect();
+      const cx = r.x + r.s / 2, cy = r.y + r.s / 2;
+      evw.flash = 1; EL.tween(evw, { flash: 0 }, 200);
+      evw.hp = ev.hp;
+      v.fx.ring(cx, cy, 26, "#ffd35a", 260, 3);
+      v.fx.burst(cx, cy, 16, { speed: [60, 200], life: [200, 420], palette: ["#fff6df", "#ffd35a", "#ffb020"], sizes: [2, 4], glow: true });
+      v.postfx.flashLight(cx, cy, 110, "255,210,120", 0.8, 240);
+      v.floats.spawn(ev.dmg, cx + 10, cy - 26, { s: 3, color: "#ffd35a", life: 700 });
+      const word = { wall: "ドン！", ember: "ジュッ！", tangle: "ゴツン！", full: "ゴツン！", boss: "ゴツン！" }[ev.reason] || "";
+      if (word) v.floats.spawn(word, cx - 6, cy - 50, { kind: "jp", color: C.cream, life: 600, vy: -30 });
+      S.play("slash"); S.play("rotate");
+      EL.hitstop(60);
+      this.cam.shake(4, 160);
+      await EL.wait(90);
+    }
+    async ev_tangle(ev) {
+      const v = this.v;
+      for (const uid of ev.uids) { const w = this.enemyViews[uid]; if (w) w.tangled = true; }
+      this.layoutStacks();
+      const c = tc(ev.x, ev.y);
+      v.fx.ring(c.x, c.y, 34, "#b08cff", 360, 4);
+      v.floats.spawn("もつれ！", c.x, c.y - 44, { kind: "jp", color: "#e9dcff", life: 900, vy: -30 });
+
+      S.play("chime");
+      await EL.wait(160);
+      this.refreshObjectives();
+    }
+    async ev_kill(ev) {
+      const v = this.v, evw = this.enemyViews[ev.uid];
+      if (!evw) return;
+      const r = evw.rect();
+      const cx = r.x + r.s / 2, bottom = r.y + r.s - 6;
+      const scorch = ev.src === "scorch" || ev.src === "friendly";
+      if (!scorch) { this.chain = ev.chain; v.combo.chain = ev.chain; v.combo.t = 0; v.combo.alpha = 1; EL.tweens.kill(v.combo); }
+      evw.flash = 1;
+      await EL.wait(40);
+      evw.dead = true;
+      v.fx.shatter(evw.sprite, cx, bottom, evw.boss ? 3 : 2, evw.flip);
+      v.fx.ring(cx, r.y + r.s / 2, evw.boss ? 70 : 34, C.emberL, 420, 4);
+      v.fx.burst(cx, r.y + r.s / 2, 26 + Math.min(6, ev.chain || 1) * 4, { speed: [40, 220], life: [400, 900], palette: [C.ember, C.emberL, "#c24a12", C.cream], sizes: [2, 4], ay: -90, drag: 0.03, glow: true });
+      const ck = Math.min(6, ev.chain || 1);
+      v.postfx.flashLight(cx, r.y + r.s / 2, 170 + ck * 18, "255,200,110", 1, 420);
+      v.fx.rays(cx, r.y + r.s / 2, 10 + ck * 2, 60 + ck * 10, C.emberL, 380);
+      if (ck >= 3) v.fx.rays(cx, r.y + r.s / 2, 16, 90 + ck * 10, C.cream, 460);
+      this.cam.punch(0.02 + ck * 0.008, cx, r.y + r.s / 2);
+      v.fx.tileFlash(evw.tx, evw.ty, "rgba(255,211,90,0.5)", 260);
+      const c = Math.max(1, ev.chain || 1);
+      S.play("kill", c);
+      if (c >= 2 && Math.random() < 0.45) S.voice(this.run.heroId, c >= 3 ? "cheer" : null);
+      S.groan();
+      EL.hitstop(80 + Math.min(5, c) * 14);
+      this.cam.shake(3 + Math.min(6, c), 200 + c * 30);
+      if (c >= 3) { v.vignette.white = 0.22; EL.tween(v.vignette, { white: 0 }, 200, { clock: "ui" }); }
+      if (ev.refund > 0) {
+        v.floats.spawn("+" + ev.refund + " MOVE", cx, r.y + r.s + 4, { s: 2, color: C.heal, life: 900, vy: -24 });
+        this.flyOrb(cx, r.y + r.s / 2, ev.moves);
+      }
+      v.pressureHUD.value = this.nightOf(v.playerHUD.hp, this.aliveAfterKill(ev.uid), 0, 0).press;
+      if (!scorch) EL.tween(v.combo, { alpha: 0 }, 400, { delay: 1600, clock: "ui" });
+      if (evw.type === "totem" || Object.values(this.enemyViews).some((w) => w.sealed)) this.liveSeals();
+      await EL.wait(c >= 3 ? 150 : 100);
+    }
+    aliveAfterKill(uid) {
+      this.deadSet = this.deadSet || new Set();
+      this.deadSet.add(uid);
+      return this.B.enemies.map((e) => Object.assign({}, e, { alive: !this.deadSet.has(e.uid) }));
+    }
+    flyOrb(x, y, moves) {
+      const v = this.v;
+      const orb = v.orbs.add(new EL.Node("RefundOrb"));
+      orb.x = x; orb.y = y; orb.k = 0;
+      const tx = v.moveHUD.x + 62, ty = v.moveHUD.y + 22;
+      const s0 = EL.warp ? EL.warp.project(x, y) : { x, y };
+      x = s0.x; y = s0.y; orb.x = x; orb.y = y;
+      const sx = x, sy = y, mx = (x + tx) / 2 + U.rand(-40, 40), my = Math.min(y, ty) - 80;
+      orb.draw = (ctx) => {
+        const f = Math.floor(EL.Time.ui / 60) % 2;
+        ctx.fillStyle = C.ink; ctx.fillRect(-5, -5, 10, 10);
+        ctx.fillStyle = f ? C.heal : "#e8ffd9"; ctx.fillRect(-3, -3, 6, 6);
+      };
+      EL.tween(orb, { k: 1 }, 380, {
+        clock: "ui", ease: U.ease.inQuad,
+        onUpdate: (e) => {
+          const k = e;
+          orb.x = (1 - k) * (1 - k) * sx + 2 * (1 - k) * k * mx + k * k * tx;
+          orb.y = (1 - k) * (1 - k) * sy + 2 * (1 - k) * k * my + k * k * ty;
+          if (Math.random() < 0.6) v.hudFx.add({ x: orb.x, y: orb.y, vx: 0, vy: 10, life: 260, size: 2, color: C.heal });
+        },
+      }).then(() => {
+        v.orbs.remove(orb);
+        v.moveHUD.pulse = 1; v.moveHUD.gain = 0.5;
+        EL.tween(v.moveHUD, { pulse: 0, gain: 0 }, 260, { clock: "ui" });
+        v.hudFx.burst(tx, ty, 10, { speed: [40, 120], life: [200, 400], palette: [C.heal, "#e8ffd9"], size: 2 });
+        S.play("refund", Math.min(8, this.chain));
+      });
+    }
+    async ev_skill(ev) {
+      const v = this.v, info = D.COMPANIONS[ev.comp];
+      const ci = this.run.companions.indexOf(ev.comp);
+      const cu = this.compViews[ci];
+      const card = v.companionHUD.cards[ci];
+      if (card) { card.fired = true; card.charge = 0; card.ready = false; card.bounce = 1; card.flash = 1; EL.tween(card, { bounce: 0, flash: 0 }, 300, { clock: "ui" }); }
+      // cut-in (world holds its breath)
+      const ci2 = v.cutin;
+      ci2.comp = ev.comp; ci2.p = 0; ci2.alpha = 1;
+      EL.hitstop(760);
+      S.play("skill"); S.voice(ev.comp, "cheer");
+      if (cu) { cu.hop = 10; EL.tween(cu, { hop: 0 }, 300, { clock: "ui", ease: U.ease.outBack }); cu.flash = 1; EL.tween(cu, { flash: 0 }, 300, { clock: "ui" }); }
+      await EL.tween(ci2, { p: 1 }, 220, { clock: "ui", ease: U.ease.outCubic });
+      await EL.wait(380, "ui");
+      await EL.tween(ci2, { alpha: 0 }, 160, { clock: "ui" });
+      ci2.comp = null;
+      const hero = v.hero;
+      const here = tc(this.path[this.path.length - 1].x, this.path[this.path.length - 1].y);
+      const SKL = { pierce: "255,230,120", burst: "255,140,60", haste: "140,220,255", volley: "150,240,130", guard: "140,200,255", shadow: "170,130,255", ring: "130,210,255" };
+      const lc = ev.effect === "burst" ? tc(ev.data.center.x, ev.data.center.y) : here;
+      v.postfx.flashLight(lc.x, lc.y, ev.effect === "burst" || ev.effect === "ring" ? 260 : 170, SKL[ev.effect] || "255,255,255", 1, 600);
+      v.fx.rays(lc.x, lc.y, 14, 80, D.COMPANIONS[ev.comp].color, 480);
+      switch (ev.effect) {
+        case "pierce": {
+          const to = ev.data.target ? this.enemyTile(ev.data.target) : { x: ev.data.to.x - ev.data.dir[0], y: ev.data.to.y - ev.data.dir[1] };
+          const b = tc(to.x, to.y);
+          v.fx.beam(here.x, here.y, b.x, b.y, C.emberL, 360);
+          v.fx.burst(b.x, b.y, 24, { speed: [60, 220], life: [200, 450], palette: [C.emberL, C.cream], size: 2, glow: true });
+          v.postfx.flashLight(b.x, b.y, 140, "255,230,120", 1, 360);
+          S.play("beam"); this.cam.shake(4, 160);
+          break;
+        }
+        case "burst": {
+          const c = tc(ev.data.center.x, ev.data.center.y);
+          for (const t of ev.data.area) if (t.x >= 0 && t.y >= 0 && t.x < 7 && t.y < 8) v.fx.tileFlash(t.x, t.y, "rgba(255,138,42,0.55)", 420);
+          v.fx.ring(c.x, c.y, 80, C.ember, 460, 4);
+          v.fx.ring(c.x, c.y, 50, C.emberL, 360, 4);
+          v.fx.burst(c.x, c.y, 60, { speed: [60, 280], life: [300, 800], palette: [C.ember, C.emberL, "#ff4d5e", C.cream], sizes: [2, 4], ay: -120, glow: true });
+          this.cam.punch(0.05, c.x, c.y);
+          S.play("fire"); this.cam.shake(7, 260);
+          break;
+        }
+        case "haste": {
+          v.fx.burst(hero.x, hero.y - 16, 16, { speed: [40, 120], life: [300, 600], palette: [C.move, C.cream, "#d3dbea"], size: 2, shape: "plus" });
+          v.floats.spawn("+" + ev.data.amount + " MOVE", hero.x, hero.y - 56, { s: 2, color: C.heal, life: 900 });
+          if (ev.moves != null) v.moveHUD.moves = ev.moves;
+          v.moveHUD.pulse = 1; EL.tween(v.moveHUD, { pulse: 0 }, 300, { clock: "ui" });
+          S.play("gear");
+          break;
+        }
+        case "volley": {
+          const src = cu ? { x: cu.x, y: cu.y - 20 } : here;
+          for (const uid of ev.data.targets || []) {
+            const evw = this.enemyViews[uid];
+            if (!evw) continue;
+            const r = evw.rect();
+            v.fx.beam(src.x, src.y, r.x + r.s / 2, r.y + r.s / 2, C.heal, 260);
+            S.play("arrow");
+            await EL.wait(90);
+          }
+          break;
+        }
+        case "guard": hero.shield = 1; EL.tween(hero, { shield: 0.35 }, 500); S.play("block"); break;
+        case "shadow": hero.aura = 1; hero.auraColor = "#b08cff"; v.floats.spawn("SHADOW", hero.x, hero.y - 56, { s: 2, color: "#c9b3ff", life: 900 }); S.play("shadow"); break;
+        case "ring": {
+          const poly = ev.data.poly;
+          for (let k = 0; k < poly.length; k++) {
+            const a = tc(poly[k].x, poly[k].y), b = tc(poly[(k + 1) % poly.length].x, poly[(k + 1) % poly.length].y);
+            v.fx.beam(a.x, a.y, b.x, b.y, C.move, 520);
+          }
+          const cx = poly.reduce((s, t) => s + tc(t.x, t.y).x, 0) / poly.length, cy = poly.reduce((s, t) => s + tc(t.x, t.y).y, 0) / poly.length;
+          v.fx.ring(cx, cy, 70, C.move, 520, 4);
+          S.play("beam"); S.play("chime"); this.cam.shake(5, 220);
+          break;
+        }
+      }
+      await EL.wait(200);
+    }
+    async ev_skillHit(ev) {
+      const v = this.v, evw = this.enemyViews[ev.uid];
+      if (!evw) return;
+      const r = evw.rect();
+      const cx = r.x + r.s / 2, cy = r.y + r.s / 2;
+      evw.flash = 1; EL.tween(evw, { flash: 0 }, 200);
+      evw.hp = ev.hp;
+      const col = D.COMPANIONS[ev.comp] ? D.COMPANIONS[ev.comp].color : C.cream;
+      v.floats.spawn(ev.dmg, cx, cy - 30, { s: 3, color: col, life: 750 });
+      v.fx.burst(cx, cy, 10, { speed: [60, 180], life: [200, 380], palette: [col, C.cream], size: 2 });
+      S.play("slash");
+      EL.hitstop(45);
+      await EL.wait(80);
+    }
+    /* heat vented (kills, skills, relics): a cool puff, quiet for kills */
+    async ev_heal(ev) {
+      const v = this.v, h = v.hero;
+      v.floats.spawn("熱−" + ev.amount, h.x + 26, h.y - 40, { kind: "jp", color: C.move, life: 700, vy: -30 });
+      v.fx.burst(h.x, h.y - 16, 10, { speed: [20, 80], life: [300, 600], palette: [C.move, "#e0f6ff"], size: 2, ay: -80 });
+      v.playerHUD.hp = ev.hp;
+      if (!ev.vent) S.play("heal");
+      await EL.wait(ev.vent ? 40 : 120);
+    }
+    /* a condition met: the companion's gauge jumps */
+    async ev_charge(ev) {
+      const v = this.v, ci = this.run.companions.indexOf(ev.comp);
+      const card = v.companionHUD.cards[ci], cu = this.compViews[ci];
+      if (card) { card.charge = ev.charge; card.flash = 0.8; EL.tween(card, { flash: 0 }, 260, { clock: "ui" }); }
+      if (cu) { cu.hop = 6; EL.tween(cu, { hop: 0 }, 220, { clock: "ui", ease: U.ease.outBack }); }
+      if (ev.charge >= 100 && ev.from < 100) { S.play("skillReady"); if (cu) v.floats.spawn("FULL", cu.x, cu.y - 40, { s: 2, color: D.COMPANIONS[ev.comp].color, life: 700 }); }
+    }
+    async ev_revive(ev) {
+      const v = this.v, h = v.hero;
+      v.vignette.white = 0.7; EL.tween(v.vignette, { white: 0 }, 600, { clock: "ui" });
+      v.floats.spawn("REVIVE", h.x, h.y - 60, { s: 3, color: C.emberL, life: 1200 });
+      v.playerHUD.hp = ev.hp;
+      S.play("relic"); v.relicHUD.fresh = "plume";
+      await EL.wait(500);
+    }
+    async ev_relic(ev) {
+      const v = this.v, h = v.hero;
+      v.floats.spawn("+2 MOVE", h.x, h.y - 56, { s: 2, color: C.heal, life: 800 });
+      v.moveHUD.moves = ev.moves;
+      v.relicHUD.fresh = ev.id; setTimeout(() => (v.relicHUD.fresh = null), 900);
+      S.play("refund", 4);
+      await EL.wait(120);
+    }
+    async ev_bossPhase(ev) {
+      const v = this.v, evw = this.enemyViews[ev.uid];
+      EL.hitstop(900);
+      S.play("phase");
+      this.cam.shake(8, 900);
+      if (evw) {
+        evw.phase2 = true; evw.flash = 1; EL.tween(evw, { flash: 0 }, 800, { clock: "ui" });
+        const r = evw.rect();
+        v.postfx.flashLight(r.x + r.s / 2, r.y + r.s / 2, 340, "255,60,80", 1, 1100);
+        v.fx.rays(r.x + r.s / 2, r.y + r.s / 2, 20, 150, "#ff4d5e", 900);
+        v.fx.burst(r.x + r.s / 2, r.y + r.s / 2, 50, { speed: [60, 260], life: [500, 1100], palette: ["#ff4d5e", "#ff8a2a", "#7af0ff"], sizes: [2, 4], glow: true, ay: -60 });
+      }
+      v.bg.pulse = 1; EL.tween(v.bg, { pulse: 0.4 }, 900, { clock: "ui" });
+      await this.banner("AWAKEN", "灰冠が覚醒した — 手下が増え、灰の波が強まる", "#ff8a2a", 1300);
+    }
+    async ev_victory() { await EL.wait(60); }
+    async ev_heroDown() { await EL.wait(60); }
+
+    async banner(text, sub, color, hold) {
+      const b = this.v.banner;
+      b.text = text; b.sub = sub || ""; b.color = color || C.emberL; b.band = 0; b.alpha = 1; b.tx = -300;
+      await Promise.all([EL.tween(b, { band: 1 }, 180, { clock: "ui" }), EL.tween(b, { tx: 0 }, 260, { clock: "ui", ease: U.ease.outBack })]);
+      await EL.wait(hold || 600, "ui");
+      await Promise.all([EL.tween(b, { tx: 300 }, 200, { clock: "ui", ease: U.ease.inQuad }), EL.tween(b, { alpha: 0 }, 220, { clock: "ui" })]);
+    }
+
+    /* ---------- enemy phase choreography ---------- */
+    async playEnemyPhase(events) {
+      const v = this.v;
+      let pending = [];
+      for (const ev of events) {
+        switch (ev.type) {
+          case "scorch": {
+            const evw = this.enemyViews[ev.uid];
+            if (!evw) break;
+            const r = evw.rect();
+            v.fx.burst(r.x + r.s / 2, r.y + r.s - 8, 14, { speed: [20, 90], life: [300, 600], palette: [C.ember, C.emberL], size: 2, ay: -160 });
+            evw.hp = ev.hp; evw.flash = 1; EL.tween(evw, { flash: 0 }, 200);
+            v.floats.spawn(ev.dmg, r.x + r.s / 2, r.y - 4, { s: 2, color: C.ember });
+            S.play("fire");
+            await EL.wait(160);
+            break;
+          }
+          case "kill": await this.ev_kill(ev); break;
+          case "victory": return "victory";
+          case "cool": {
+            const n = ev.tiles.length;
+            const tr = v.footprints.trail;
+            for (let k = 0; k < n; k++) {
+              const t = tr[k];
+              if (t) { v.footprints.ashes.push({ x: t.x, y: t.y, t: -k * 40 }); const c = tc(t.x, t.y); v.fx.burst(c.x, c.y, 3, { speed: [5, 25], life: [400, 800], palette: ["#8a7f86", "#5c5058"], size: 2, angle: -Math.PI / 2, spread: 1, ay: -30 }); }
+            }
+            v.footprints.trail = tr.slice(n);
+            this.coolPreview();
+            S.play("cool");
+            await EL.wait(360);
+            break;
+          }
+          case "pressure": {
+            const evw = this.enemyViews[ev.uid];
+            if (!evw) break;
+            const r = evw.rect();
+            const sx = r.x + r.s / 2, sy = r.y + r.s / 2;
+            evw.oy = -6; EL.tween(evw, { oy: 0 }, 220, { ease: U.ease.outBack });
+            const h = v.hero;
+            const dist = Math.hypot(h.x - sx, h.y - 16 - sy);
+            const sp = 520;
+            v.fx.add({ x: sx, y: sy, vx: ((h.x - sx) / dist) * sp, vy: ((h.y - 16 - sy) / dist) * sp, life: (dist / sp) * 1000, size: 6, colors: ["#e9dcff", "#b08cff", "#5c34b0"], shrink: false, glow: true });
+            for (let k = 0; k < 4; k++) v.fx.add({ x: sx, y: sy, vx: ((h.x - sx) / dist) * sp * 0.9, vy: ((h.y - 16 - sy) / dist) * sp * 0.9, life: (dist / sp) * 1000 * 1.05, size: 2, color: "#b08cff", delay: 0 });
+            S.play("bolt");
+            pending.push(ev);
+            await EL.wait(110);
+            break;
+          }
+          case "heroHit": {
+            await EL.wait(260);
+            const h = v.hero;
+            h.red = 1; EL.tween(h, { red: 0 }, 400);
+            h.ox = -8; EL.tween(h, { ox: 0 }, 300, { ease: U.ease.outElastic });
+            if (ev.total > 0) v.floats.spawn("熱+" + ev.total, h.x, h.y - 56, { kind: "jp", size: 24, color: "#ff6a4a", life: 1100 });
+            if (ev.reduced) v.floats.spawn("余熱 圧-" + ev.reduced, h.x, h.y - 88, { kind: "jp", color: C.emberL, life: 1100, vy: -30 });
+            if (ev.src === "strike") v.floats.spawn("直撃", h.x, h.y - 88, { kind: "jp", color: "#ffb020", life: 1000, vy: -30 });
+            v.fx.burst(h.x, h.y - 16, 28, { speed: [60, 220], life: [200, 550], palette: ["#b08cff", "#ff4d5e", "#5c34b0"], size: 2, glow: true });
+            v.postfx.flashLight(h.x, h.y - 16, 170, "180,110,255", 1, 500);
+            v.playerHUD.hp = ev.hp; v.playerHUD.shake = 4; v.playerHUD.flash = 0.7;
+            EL.tween(v.playerHUD, { shake: 0, flash: 0 }, 400, { clock: "ui" });
+            v.vignette.red = 1; EL.tween(v.vignette, { red: 0 }, 600, { clock: "ui" });
+            v.bg.pulse = 1; EL.tween(v.bg, { pulse: this.B.isBoss && this.B.phase2 ? 0.4 : 0 }, 600, { clock: "ui" });
+            if (ev.total > 0) { S.play("hurt"); S.voice(this.run.heroId, "hurt"); this.cam.shake(7, 320); EL.hitstop(90); }
+            pending = [];
+            await EL.wait(520);
+            break;
+          }
+          case "revive": await this.ev_revive(ev); break;
+          case "cool2": {
+            const h = v.hero;
+            v.floats.spawn("夜風 熱−" + ev.amount, h.x, h.y - 60, { kind: "jp", color: C.move, life: 900, vy: -24 });
+            v.fx.burst(h.x, h.y - 16, 16, { speed: [20, 70], life: [400, 800], palette: [C.move, "#e0f6ff", "#5a7aa8"], size: 2, ay: -40 });
+            v.playerHUD.hp = ev.hp;
+            S.play("cool");
+            await EL.wait(420);
+            break;
+          }
+          case "heroDown": return "dead";
+          case "rotate": {
+            const evw = this.enemyViews[ev.uid];
+            if (!evw) break;
+            evw.weak = ev.weak; evw.flip = ev.weak === "L"; evw.spin = 0;
+            EL.tween(evw, { spin: 1 }, 320);
+            S.play("rotate");
+            await EL.wait(160);
+            break;
+          }
+          case "summon": {
+            const e = ev.enemy;
+            const evw = this.addEnemyView(e);
+            evw.alpha = 0; evw.oy = 10;
+            const r = evw.rect();
+            v.fx.ring(r.x + r.s / 2, r.y + r.s / 2, 30, "#b08cff", 500, 4);
+            v.fx.burst(r.x + r.s / 2, r.y + r.s / 2, 22, { speed: [30, 110], life: [300, 700], palette: ["#b08cff", "#5c34b0", "#e9dcff"], size: 2, ay: -60, glow: true });
+            v.postfx.flashLight(r.x + r.s / 2, r.y + r.s / 2, 120, "170,120,255", 0.9, 500);
+            EL.tween(evw, { alpha: 1, oy: 0 }, 360, { ease: U.ease.outBack });
+            S.play("summon");
+            await EL.wait(280);
+            break;
+          }
+          case "strike": {
+            const evw = this.enemyViews[ev.uid];
+            v.board.teles = v.board.teles.filter((t) => t.uid !== ev.uid);
+            if (evw) {
+              const r = evw.rect();
+              evw.oy = -10; EL.tween(evw, { oy: 0 }, 260, { ease: U.ease.outBack });
+              evw.flash = 1; EL.tween(evw, { flash: 0 }, 200);
+              v.postfx.flashLight(r.x + r.s / 2, r.y + r.s / 2, 110, "255,90,60", 0.8, 300);
+            }
+            for (const t of ev.tiles) {
+              const c = tc(t.x, t.y);
+              v.fx.tileFlash(t.x, t.y, "rgba(255,70,40,0.6)", 320);
+              v.fx.burst(c.x, c.y, 8, { speed: [40, 140], life: [200, 420], palette: ["#ff5a3a", "#ffb020", "#fff6df"], size: 2, glow: true });
+            }
+            S.play("fire"); this.cam.shake(4, 180);
+            await EL.wait(240);
+            break;
+          }
+          case "friendly": {
+            const evw = this.enemyViews[ev.uid];
+            if (!evw) break;
+            const r = evw.rect();
+            evw.hp = ev.hp; evw.flash = 1; EL.tween(evw, { flash: 0 }, 200);
+            v.floats.spawn(ev.dmg, r.x + r.s / 2, r.y - 4, { s: 3, color: "#ffb020" });
+            v.floats.spawn("同士討ち", r.x + r.s / 2, r.y - 30, { kind: "jp", color: C.emberL, life: 800, vy: -30 });
+            S.play("slash"); EL.hitstop(60);
+            await EL.wait(160);
+            break;
+          }
+          case "grow": {
+            for (const uid of ev.uids) {
+              const w = this.enemyViews[uid];
+              if (!w || w.dead) continue;
+              const r = w.rect();
+              v.floats.spawn("圧+1", r.x + r.s / 2, r.y - 4, { kind: "jp", color: "#ff9ee0", life: 800, vy: -30 });
+              v.fx.burst(r.x + 10, r.y + 8, 6, { speed: [20, 60], life: [300, 600], palette: ["#ff6ad0", "#b08cff"], size: 2, ay: -60, glow: true });
+            }
+            this.refreshEnemyStatics();
+            S.play("bolt");
+            await EL.wait(260);
+            break;
+          }
+          case "untangle": {
+            const tw = [];
+            for (const m of ev.moves) { const w = this.enemyViews[m.uid]; if (w) tw.push(EL.tween(w, { tx: m.to.x, ty: m.to.y }, 220, { ease: U.ease.outQuad })); }
+            for (const k in this.enemyViews) this.enemyViews[k].tangled = false;
+            await Promise.all(tw);
+            this.layoutStacks();
+            break;
+          }
+          case "move": {
+            const w = this.enemyViews[ev.uid];
+            if (!w) break;
+            w.oy = -4;
+            S.play("foot", 1);
+            await Promise.all([EL.tween(w, { tx: ev.to.x, ty: ev.to.y }, 200, { ease: U.ease.inOutSine }), EL.tween(w, { oy: 0 }, 200)]);
+            break;
+          }
+          case "teles": {
+            this.refreshEnemyStatics();
+            this.refreshBoardMarks();
+            if (v.board.teles.length) S.play("lock");
+            break;
+          }
+          case "turn": {
+            v.turnHUD.turn = ev.turn;
+            this.refreshEnemyStatics();
+            S.play("turn");
+            await this.banner("TURN " + ev.turn, "", C.gold, 380);
+            break;
+          }
+        }
+      }
+      return "ok";
+    }
+  }
+
+  /* ================= states ================= */
+  const STATES = {
+    Title: {
+      enter() {
+        const v = this.v;
+        this.run = null; this.B = null;
+        v.bg.theme = "title"; v.bg.pulse = 0;
+        this.setHud("none");
+        v.battleWorld.visible = false; v.mapView.visible = false; v.hudLayer.visible = false;
+        this.showOnly(["title"]);
+        const r = this.record;
+        v.title.record = r.runs ? `挑戦 ${r.runs}回 ・ 踏破 ${r.wins || 0}回 ・ 最大連鎖 ${r.bestChain || 0}` : "";
+        S.bgm("map");
+      },
+      on(evt) {
+        if (evt.type !== "ui.click") return;
+        if (evt.data.id === "title.start") { S.play("confirm"); this.wipe(async () => this.go("CharSelect")); }
+        if (evt.data.id === "title.help") { S.play("confirm"); this.openHelp(); }
+      },
+    },
+
+    CharSelect: {
+      enter() {
+        const v = this.v;
+        this.showOnly(["charSelect"]);
+        v.bg.theme = "map";
+        v.charSelect.selected = null;
+        v.charSelect.cards.forEach((c) => (c.selected = false));
+        v.charSelect.confirm.disabled = true;
+        this.setHud("none"); v.hudLayer.visible = false;
+      },
+      on(evt) {
+        if (evt.type !== "ui.click") return;
+        const v = this.v, d = evt.data;
+        if (d.id === "char.pick") {
+          v.charSelect.selected = d.hero;
+          v.charSelect.cards.forEach((c) => (c.selected = c.hero === d.hero));
+          v.charSelect.confirm.disabled = false;
+          v.charSelect.confirm.glow = 1;
+          S.play("pick"); S.voice(d.hero);
+        }
+        if (d.id === "char.back") this.wipe(async () => this.go("Title"));
+        if (d.id === "char.confirm" && v.charSelect.selected) {
+          S.play("confirm"); S.voice(v.charSelect.selected, "cheer");
+          this.run = L.createRun(v.charSelect.selected);
+          this.record.runs = (this.record.runs || 0) + 1; this.saveRecord();
+          this.v.mapView.setMap(this.run.map);
+          this.wipe(async () => this.go("Map", { first: true }));
+        }
+      },
+    },
+
+    Map: {
+      enter(arg) {
+        const v = this.v, run = this.run;
+        this.showOnly([]);
+        this.setHud("map");
+        v.bg.theme = "map"; v.bg.pulse = 0;
+        S.bgm("map");
+        this.refreshRunHud();
+        v.turnHUD.floor = this.floorText();
+        const open = L.nextNodes(run);
+        v.mapView.setState(run.visited, run.nodeId, open);
+        v.mapView.heroSprite = D.HEROES[run.heroId].sprite;
+        const cur = run.nodeId ? run.map.nodes[run.nodeId] : { x: 34, y: 606 };
+        v.mapView.sub = arg && arg.first ? "光る場所をタップして進む" : "";
+        v.mapView.marker = { x: cur.x, y: cur.y + 8 };
+        const rowNext = open.length ? run.map.nodes[open[0]].row : 0;
+        v.mapView.floorText = rowNext >= D.BAL.maxRows ? "最深部 — 灰冠の王が待つ" : `第${rowNext + 1}層 / ${D.BAL.maxRows}層`;
+        this.hint(arg && arg.first ? "光る場所をタップして進む" : "次の行き先を選ぼう");
+      },
+      on(evt) {
+        if (evt.type !== "ui.click" || evt.data.id !== "map.node") return;
+        const open = L.nextNodes(this.run);
+        if (!open.includes(evt.data.node)) { S.play("invalid"); return; }
+        this.go("MapTravel", evt.data.node);
+      },
+    },
+
+    MapTravel: {
+      async enter(id) {
+        const v = this.v, run = this.run;
+        this.busy = true;
+        const n = run.map.nodes[id];
+        S.play("travel");
+        await EL.tween(v.mapView.marker, { x: n.x, y: n.y + 8 }, 520, { clock: "ui", ease: U.ease.inOutSine });
+        run.nodeId = id; run.visited.push(id);
+        this.busy = false;
+        switch (n.type) {
+          case "battle": case "elite": this.go("BattleIntro", n); break;
+          case "boss": this.go("BossIntro", n); break;
+          case "treasure": this.go("Treasure"); break;
+          case "rest": this.go("Rest"); break;
+          case "event": this.go("Event"); break;
+        }
+      },
+    },
+
+    BattleIntro: {
+      async enter(node) {
+        const v = this.v, run = this.run;
+        this.B = L.genBattle(run, node);
+        this.deadSet = new Set();
+        await this.wipe(async () => {
+          this.showOnly([]);
+          this.setHud("battle");
+          v.bg.theme = this.B.loc || (node.type === "boss" ? "boss" : "temple");
+          this.refreshRunHud();
+          this.setupBattle();
+          this.resetTurnHud();
+          v.hint.text = "";
+        }, node.type === "elite" ? "#1a0508" : "#07050d");
+        if (node.type === "boss") S.bgm("boss"); else S.bgm("battle");
+        if (node.type !== "boss") {
+          const si = v.stageIntro;
+          si.title = node.type === "elite" ? "強敵" : "戦闘";
+          si.sub = `${this.floorText()} ・ ${EL.Locations.get(this.B.loc).name} ・ 敵 ${this.B.enemies.length}体`;
+          si.color = node.type === "elite" ? "#ff4d5e" : C.gold;
+          si.icon = null;
+          this.busy = true;
+          await EL.tween(si, { alpha: 1 }, 200, { clock: "ui" });
+          await EL.wait(700, "ui");
+          await EL.tween(si, { alpha: 0 }, 200, { clock: "ui" });
+          this.busy = false;
+        }
+        this.first = run.stats.turns === 0;
+        this.go("Battle.Idle");
+      },
+    },
+
+    BossIntro: {
+      async enter(node) {
+        const v = this.v;
+        S.bgm(null);
+        this.busy = true;
+        await this.wipe(async () => { this.showOnly([]); v.hudLayer.visible = false; v.battleWorld.visible = false; v.mapView.visible = false; v.bg.theme = "boss"; }, "#000");
+        this.busy = true;
+        const bi = v.bossIntro;
+        bi.alpha = 1; bi.bars = 0; bi.p = 0; bi.shake = 0;
+        await EL.tween(bi, { bars: 1 }, 400, { clock: "ui" });
+        S.play("roar");
+        bi.shake = 6; this.cam.shake(8, 1200);
+        await EL.tween(bi, { p: 1 }, 900, { clock: "ui", ease: U.ease.outCubic });
+        EL.tween(bi, { shake: 0 }, 600, { clock: "ui" });
+        await EL.wait(1100, "ui");
+        await EL.tween(bi, { alpha: 0 }, 300, { clock: "ui" });
+        this.busy = false;
+        this.go("BattleIntro", node);
+      },
+    },
+
+    "Battle.Idle": {
+      enter() {
+        const v = this.v, B = this.B, run = this.run;
+        this.route = null; this.preview = null; this.tapTile = null;
+        this.resetTurnHud();
+        v.board.heroTile = { x: B.hero.x, y: B.hero.y };
+        EL.tween(v.board, { heroHint: 1 }, 300, { clock: "ui" });
+        v.hero.aura = 0; v.hero.shield = 0;
+        this.coolPreview();
+        v.route.pts = [];
+        if (this.startOpen()) this.hint("光るマスからなぞるか、行き先をタップ");
+        else if (run.companions.some((c) => (run.charge[c] || 0) >= 100)) this.hint("仲間が撃てる — ルートを描いてからカードをタップ");
+        else this.hint(this.first ? "なぞるか、行き先のマスをタップしてルートを作ろう" : `ルートを描いて切り抜けろ — 残り${B.enemies.length}体`);
+        // boxed in by embers? the oldest embers crumble until a way opens
+        if (!L.canMove(B)) {
+          const cooled = L.unstick(B);
+          if (cooled.length) {
+            const v2 = this.v;
+            cooled.forEach((t, k) => v2.footprints.ashes.push({ x: t.x, y: t.y, t: -k * 60 }));
+            v2.footprints.trail = B.trail.map((t) => ({ x: t.x, y: t.y }));
+            this.path = B.trail.map((t) => ({ x: t.x, y: t.y }));
+            this.coolPreview();
+            S.play("cool");
+            this.toast("足跡が崩れた", "囲まれたので、古い足跡から冷めて道が開いた");
+          }
+          if (!L.canMove(B)) {
+            // truly walled in by rocks: pass the turn
+            this.busy = true;
+            this.hint("動けない！");
+            S.play("invalid");
+            setTimeout(() => { this.busy = false; B.lastT = { moves: 0 }; this.go("Battle.EnemyPhase"); }, 1100);
+          }
+        }
+      },
+      exit() { EL.tween(this.v.board, { heroHint: 0 }, 150, { clock: "ui" }); },
+      on(evt) {
+        if (evt.type !== "route.input") return;
+        const d = evt.data, B = this.B;
+        if (d.phase === "begin") {
+          const hc = tc(B.hero.x, B.hero.y);
+          const spot = this.startAt(d);
+          if (spot) { this.moveStart(spot); this.go("Battle.Dragging"); return; }
+          const grabbed = (d.tile && sameTile(d.tile, B.hero)) || Math.hypot(d.px - hc.x, d.py - hc.y) < V.GEO.T * 0.85;
+          if (grabbed) { this.go("Battle.Dragging"); return; }
+          this.tapTile = d.tile; this.tapT = EL.Time.ui;
+        } else if (d.phase === "end") {
+          this.tapPlan(d);
+          this.tapTile = null;
+        }
+      },
+    },
+
+    "Battle.Dragging": {
+      enter(resume) {
+        const v = this.v;
+        S.play("grab");
+        this.showActions(false);
+        v.hero.sq = 0.15; EL.tween(v.hero, { sq: 0 }, 200, { clock: "ui", ease: U.ease.outBack });
+        this.setDragUI(true);
+        if (resume) { this.route = resume.slice(); this.lastKills = 0; this.lastSkills = 0; this.lastAttacks = 0; this.updatePreview(true); }
+        else this.beginRoute();
+      },
+      on(evt) {
+        if (evt.type !== "route.input") return;
+        const d = evt.data;
+        if (d.phase === "move") {
+          if (d.tile && d.near) this.tryExtend(d.tile);
+        } else if (d.phase === "end") {
+          this.finishRoute();
+        } else if (d.phase === "cancel") {
+          this.setDragUI(false);
+          this.go("Battle.Idle");
+        }
+      },
+    },
+
+    /* the route is drawn but not launched: confirm, redo, or keep drawing from its tip */
+    "Battle.Planned": {
+      enter(route) {
+        this.route = route;
+        this.updatePreview(true);
+        this.showActions(true);
+        this.hint("");
+      },
+      exit() { this.showActions(false); },
+      on(evt) {
+        const d = evt.data;
+        if (evt.type === "ui.click") {
+          if (d.id === "route.go") { S.play("confirm"); this.go("Battle.Executing", this.route); }
+          if (d.id === "route.redo") { S.play("cancel"); this.setDragUI(false); this.go("Battle.Idle"); }
+          if (d.id === "route.undo") {
+            S.play("stepBack");
+            this.route = this.route.slice(0, -1);
+            if (this.route.length < 2) { this.setDragUI(false); this.go("Battle.Idle"); return; }
+            this.finishRoute(); // re-plans (and never leaves the route ending on an enemy)
+          }
+          return;
+        }
+        if (evt.type !== "route.input") return;
+        if (d.phase === "end") { this.tapPlan(d); this.tapTile = null; return; }
+        if (d.phase !== "begin") return;
+        const B = this.B, tip = this.route[this.route.length - 1];
+        const near = (t) => { const c = tc(t.x, t.y); return Math.hypot(d.px - c.x, d.py - c.y) < V.GEO.T * 0.7; };
+        const spot = this.startAt(d);
+        if (near(tip)) this.go("Battle.Dragging", this.route);
+        else if (spot) { this.setDragUI(false); this.moveStart(spot); this.go("Battle.Dragging"); }
+        else if (near(B.hero)) this.go("Battle.Dragging");
+        else { this.tapTile = d.tile; this.tapT = EL.Time.ui; }
+      },
+    },
+
+    "Battle.Executing": {
+      async enter(route) {
+        const v = this.v;
+        this.busy = true;
+        this.setDragUI(false);
+        this.hint("");
+        this.B.startLocked = true; v.board.starts = [];
+        const res = await this.playRoute(route);
+        L.commitRoute(this.B, this.run, route, res);
+        this.syncAfterRoute();
+        this.busy = false;
+        if (res.outcome === "victory") this.go("Battle.Victory");
+        else if (res.outcome === "dead") this.go("Battle.Defeat");
+        else this.go("Battle.EnemyPhase");
+      },
+    },
+
+    "Battle.EnemyPhase": {
+      async enter() {
+        const v = this.v;
+        this.busy = true;
+        this.hint("夜の圧が迫る…");
+        v.combo.alpha = 0;
+        await EL.wait(200);
+        const events = L.enemyPhase(this.B, this.run);
+        const out = await this.playEnemyPhase(events);
+        this.syncAfterEnemy();
+        this.busy = false;
+        if (out === "victory") this.go("Battle.Victory");
+        else if (out === "dead") this.go("Battle.Defeat");
+        else { this.first = false; this.go("Battle.Idle"); }
+      },
+    },
+
+    "Battle.Victory": {
+      async enter() {
+        const v = this.v, run = this.run, B = this.B;
+        this.busy = true;
+        EL.Time.slow = 0.3;
+        v.vignette.white = 0.4; EL.tween(v.vignette, { white: 0 }, 500, { clock: "ui" });
+        await EL.wait(520, "ui");
+        EL.Time.slow = 1;
+        S.bgm(null);
+        S.play("victory"); S.voice(run.heroId, "cheer");
+        for (let i = 0; i < 3; i++) setTimeout(() => v.hudFx.burst(U.rand(60, 300), U.rand(200, 360), 24, { speed: [40, 200], life: [500, 1100], palette: [C.ember, C.emberL, C.cream, C.gold], sizes: [2, 4], ay: 120, glow: true }), i * 180);
+        run.stats.battles++;
+        await this.banner(B.isBoss ? "CONQUERED" : "VICTORY", B.isBoss ? "灰冠の王を討ち果たした" : `撃破！ ${B.turn}ターンで制圧`, C.gold, 900);
+        if (!B.isBoss) {
+          const got = L.claimObjectives(run, B);
+          this.refreshObjectives();
+          for (const o of got) {
+            S.play("relic");
+            this.refreshRunHud();
+            if (o.reward.kind === "relic") { v.relicHUD.fresh = o.reward.id; setTimeout(() => (v.relicHUD.fresh = null), 1500); }
+            await this.banner("BONUS", `${D.OBJECTIVES[o.id].label} 達成 — ${this.rewardName(o.reward)}`, C.emberL, 900);
+          }
+          const healed = L.battleHeal(run);
+          if (healed) { v.floats.spawn("熱−" + healed, v.hero.x, v.hero.y - 50, { kind: "jp", color: C.move }); v.playerHUD.hp = run.hp; S.play("heal"); await EL.wait(500); }
+        }
+        this.busy = false;
+        if (B.isBoss) { this.wipe(async () => this.go("RunClear")); return; }
+        const kind = B.kind === "elite" ? "elite" : "battle";
+        this.go("Reward", { kind, title: kind === "elite" ? "強敵の戦利品" : "戦利品", sub: kind === "elite" ? "稀少なレリックが眠っている" : "仲間かレリックをひとつ" });
+      },
+    },
+
+    "Battle.Defeat": {
+      async enter() {
+        const v = this.v;
+        this.busy = true;
+        S.bgm(null);
+        EL.Time.slow = 0.25;
+        v.hero.red = 1;
+        await EL.tween(v.vignette, { dark: 0.55 }, 600, { clock: "ui" });
+        EL.Time.slow = 1;
+        S.play("defeat");
+        await this.banner("DEFEAT", "燈が消えた…", "#ff8f9b", 1200);
+        v.vignette.dark = 0;
+        this.busy = false;
+        this.wipe(async () => this.go("GameOver"), "#000");
+      },
+    },
+
+    Reward: {
+      enter(arg) {
+        const v = this.v, run = this.run;
+        this.rewardArg = arg;
+        this.rewards = arg.list || L.genRewards(run, arg.kind);
+        const rv = v.reward;
+        rv.title = arg.title || "戦利品"; rv.sub = arg.sub || "";
+        rv.setRewards(this.rewards);
+        rv.confirm.disabled = true;
+        rv.skip.visible = !arg.noSkip;
+        rv.skip.label = arg.kind === "lost" ? "やめておく" : "見送る（熱−10）";
+        this.showOnly(["reward"]);
+        rv.alpha = 0;
+        EL.tween(rv, { alpha: 1 }, 200, { clock: "ui" });
+        rv.cards.forEach((c, i) => { c.flip = 0; EL.tween(c, { flip: 1 }, 420, { clock: "ui", delay: 180 + i * 140, ease: U.ease.inOutSine }); setTimeout(() => S.play("pick"), 380 + i * 140); });
+        if (!rv.cards.length) { rv.confirm.disabled = true; rv.sub = "持っていけるものはなかった"; }
+      },
+      on(evt) {
+        if (evt.type !== "ui.click") return;
+        const v = this.v, rv = v.reward, d = evt.data, run = this.run;
+        if (d.id === "reward.card") {
+          rv.selected = d.index;
+          rv.cards.forEach((c, i) => (c.selected = i === d.index));
+          rv.confirm.disabled = false; rv.confirm.glow = 1;
+          const r = this.rewards[d.index];
+          if (r.kind === "comp") S.voice(r.id); else S.play("hover");
+        }
+        if (d.id === "reward.confirm" && rv.selected >= 0) {
+          const r = this.rewards[rv.selected];
+          L.applyReward(run, r);
+          S.play("relic");
+          if (r.kind === "comp") S.voice(r.id, "cheer");
+          this.refreshRunHud();
+          if (r.kind === "relic") { v.relicHUD.fresh = r.id; setTimeout(() => (v.relicHUD.fresh = null), 1500); }
+          const txt = r.kind === "comp" ? `${D.COMPANIONS[r.id].name}が仲間になった` : `${D.RELICS[r.id].name}を手に入れた`;
+          this.wipe(async () => { this.go("Map"); this.toast(txt, r.kind === "comp" ? "足跡が長く残るようになった" : D.RELICS[r.id].desc, r.kind === "relic" ? D.RELICS[r.id].icon : null); });
+        }
+        if (d.id === "reward.skip") {
+          if (this.rewardArg.kind !== "lost") L.heal(run, 10);
+          S.play("cancel");
+          this.wipe(async () => this.go("Map"));
+        }
+      },
+    },
+
+    Treasure: {
+      enter() {
+        S.play("open");
+        this.go("Reward", { kind: "treasure", title: "宝箱", sub: "ひとつだけ持っていける", noSkip: false });
+      },
+    },
+
+    Rest: {
+      enter() {
+        const run = this.run, v = this.v;
+        const amt = D.BAL.restCool;
+        this.choiceActs = ["rest", "train"];
+        v.choice.setContent("焚き火", "揺れる火が、深層の冷えを和らげる。\n最後の休息になるかもしれない。", "n_rest", [
+          { label: `休む（熱−${amt}）` }, { label: "鍛える（攻撃+1）" },
+        ]);
+        this.showOnly(["choice"]);
+        this.hint("");
+      },
+      on(evt) {
+        if (evt.type !== "ui.click" || evt.data.id !== "choice") return;
+        const run = this.run;
+        const act = this.choiceActs[evt.data.index];
+        if (act === "rest") { const h = L.heal(run, D.BAL.restCool); S.play("heal"); this.wipe(async () => { this.go("Map"); this.toast("ひと息ついた", `熱が${h}下がった`); }); }
+        if (act === "train") { run.bonusAtk++; S.play("relic"); this.wipe(async () => { this.go("Map"); this.toast("刃を研いだ", "攻撃が1上がった"); }); }
+      },
+    },
+
+    Event: {
+      enter() {
+        const run = this.run, v = this.v;
+        const pool = Object.keys(D.EVENTS).filter((k) => !(run.flags.seen || []).includes(k));
+        const id = pool.length ? pool[Math.floor(run.rng() * pool.length)] : "spring";
+        run.flags.seen = (run.flags.seen || []).concat(id);
+        const ev = D.EVENTS[id];
+        this.eventDef = ev;
+        const choices = ev.choices.map((c) => {
+          let disabled = false;
+          if (c.act === "altar" && run.hp <= 25) disabled = true;
+          if (c.act === "cursed" && run.hp <= 20) disabled = true;
+          if (c.act === "maxhp5" && !run.companions.length) disabled = true;
+          if (c.act === "recruit" && run.companions.length >= D.BAL.maxCompanions) disabled = true;
+          return { label: c.label, disabled };
+        });
+        v.choice.setContent(ev.title, ev.text, ev.icon, choices);
+        this.showOnly(["choice"]);
+        S.play("chime");
+      },
+      on(evt) {
+        if (evt.type !== "ui.click" || evt.data.id !== "choice") return;
+        const run = this.run;
+        const c = this.eventDef.choices[evt.data.index];
+        const back = (title, body, icon) => this.wipe(async () => { this.go("Map"); if (title) this.toast(title, body, icon); });
+        const grant = (rare) => {
+          const list = L.genRewards(run, rare ? "elite" : "treasure");
+          const r = list.find((x) => x.kind === "relic");
+          if (r) { L.applyReward(run, r); return r.id; }
+          return null;
+        };
+        switch (c.act) {
+          case "altar": { run.hp -= 25; const id = grant(true); S.play("relic"); back(id ? D.RELICS[id].name + "を授かった" : "何も起こらなかった", id ? D.RELICS[id].desc : "", id ? D.RELICS[id].icon : null); break; }
+          case "recruit": S.play("confirm"); this.go("Reward", { kind: "lost", title: "迷い灯", sub: "誰を連れて行く？" }); break;
+          case "heal10": { const h = L.heal(run, 25); S.play("heal"); back("灯を預けた", `熱が${h}下がった`); break; }
+          case "heal14": { const h = L.heal(run, 35); S.play("heal"); back("燠泉を飲んだ", `熱が${h}下がった`); break; }
+          case "maxhp5": run.companions.forEach((id) => (run.charge[id] = 100)); S.play("relic"); back("燠泉を浴びた", "仲間のゲージが満タンになった"); break;
+          case "cursed": { run.hp -= 20; run.flags.cursed = true; const id = grant(false); S.play("roar"); back(id ? D.RELICS[id].name + "を手に入れた" : "空っぽだった", "次の戦闘に骨砕きが紛れ込む…", id ? D.RELICS[id].icon : null); break; }
+          default: S.play("cancel"); back(); break;
+        }
+      },
+    },
+
+    RunClear: {
+      enter() {
+        const v = this.v, run = this.run;
+        this.record.wins = (this.record.wins || 0) + 1;
+        this.record.bestChain = Math.max(this.record.bestChain || 0, run.stats.maxChain);
+        this.saveRecord();
+        this.setHud("none"); v.hudLayer.visible = false; v.battleWorld.visible = false; v.mapView.visible = false;
+        this.fillResult(true);
+        this.showOnly(["result"]);
+        v.bg.theme = "title";
+        S.bgm("map");
+      },
+      on(evt) { if (evt.type === "ui.click" && evt.data.id === "result.ok") this.wipe(async () => this.go("Title")); },
+    },
+    GameOver: {
+      enter() {
+        const v = this.v, run = this.run;
+        this.record.bestChain = Math.max(this.record.bestChain || 0, run.stats.maxChain);
+        this.saveRecord();
+        this.setHud("none"); v.hudLayer.visible = false; v.battleWorld.visible = false; v.mapView.visible = false;
+        this.fillResult(false);
+        this.showOnly(["result"]);
+        v.bg.theme = "map";
+      },
+      on(evt) { if (evt.type === "ui.click" && evt.data.id === "result.ok") this.wipe(async () => this.go("Title")); },
+    },
+  };
+
+  /* helpers that need STATES defined */
+  Mediator.prototype.finishRoute = function () {
+    const B = this.B, run = this.run;
+    let r = this.route;
+    let res = L.simulate(B, run, r);
+    while (r.length > 1 && res.endBlocked) { r = r.slice(0, -1); res = L.simulate(B, run, r); }
+    // a route cut short by victory/death ends where it ended
+    if (res.outcome !== "ok") r = r.slice(0, res.last + 1);
+    if (r.length < 2) {
+      S.play("cancel");
+      this.setDragUI(false);
+      this.go("Battle.Idle");
+      return;
+    }
+    S.play("lock");
+    this.go("Battle.Planned", r);
+  };
+  Mediator.prototype.showActions = function (on) {
+    const a = this.v.actionBar;
+    EL.tweens.kill(a);
+    if (on) { a.visible = true; a.alpha = 0; a.y = 8; EL.tween(a, { alpha: 1, y: 0 }, 160, { clock: "ui", ease: U.ease.outBack }); }
+    else a.visible = false;
+    this.v.hint.visible = !on;
+  };
+  /* tiles behind the hero along the walked path, skipping tiles held by live enemies */
+  Mediator.prototype.companionSpots = function (head, settled) {
+    const out = [];
+    const occupied = (t) => Object.values(this.enemyViews).some((ev) => !ev.dead && !(this.deadSet && this.deadSet.has(ev.uid)) && t.x >= Math.round(ev.tx) && t.y >= Math.round(ev.ty) && t.x < Math.round(ev.tx) + ev.size && t.y < Math.round(ev.ty) + ev.size);
+    for (let k = this.path.length - 2; k >= 0 && out.length < this.compViews.length; k--) {
+      const t = this.path[k];
+      if (sameTile(t, head) || occupied(t)) continue;
+      out.push(t);
+    }
+    return out;
+  };
+  Mediator.prototype.syncAfterRoute = function () {
+    const v = this.v, B = this.B, run = this.run;
+    v.footprints.trail = B.trail.map((t) => ({ x: t.x, y: t.y }));
+    for (const k in this.enemyViews) if (!B.enemies.find((e) => e.uid === +k)) { v.enemies.remove(this.enemyViews[k]); delete this.enemyViews[k]; }
+    this.deadSet = new Set();
+    this.refreshEnemyStatics();
+    v.playerHUD.hp = run.hp;
+    this.path = B.trail.map((t) => ({ x: t.x, y: t.y }));
+    this.refreshBoardMarks();
+    this.refreshObjectives();
+  };
+  Mediator.prototype.refreshObjectives = function () {
+    if (this.B) this.v.objHUD.setStates(this.objectiveStates());
+  };
+  Mediator.prototype.syncAfterEnemy = function () {
+    const v = this.v, B = this.B;
+    for (const k in this.enemyViews) if (!B.enemies.find((e) => e.uid === +k)) { v.enemies.remove(this.enemyViews[k]); delete this.enemyViews[k]; }
+    v.footprints.trail = B.trail.map((t) => ({ x: t.x, y: t.y }));
+    this.path = B.trail.map((t) => ({ x: t.x, y: t.y }));
+    // companions settle onto the (possibly shortened) trail
+    const spots = this.companionSpots(B.hero, true);
+    // no free trail tile left behind the hero: huddle next to the last free spot (never on an enemy)
+    this.compViews.forEach((u, i) => this.unitTo(u, spots[i] || spots[spots.length - 1] || B.hero, 200));
+    this.refreshEnemyStatics();
+    this.refreshBoardMarks();
+    this.refreshObjectives();
+    this.coolPreview();
+  };
+  Mediator.prototype.fillResult = function (win) {
+    const v = this.v, run = this.run;
+    const rv = v.result;
+    rv.win = win;
+    rv.heroSprite = D.HEROES[run.heroId].sprite;
+    rv.comps = run.companions.slice();
+    rv.relics = run.relics.slice();
+    const depth = run.nodeId ? (run.map.nodes[run.nodeId].type === "boss" ? "最深部" : `第${run.map.nodes[run.nodeId].row + 1}層`) : "入口";
+    rv.lines = [["到達", depth], ["撃破数", run.stats.kills], ["最大連鎖", run.stats.maxChain], ["最長ルート", run.stats.bestRoute + "マス"], ["戦闘", run.stats.battles]];
+    rv.lines = rv.lines.map(([k, v2]) => [k, typeof v2 === "number" ? String(v2) : v2]);
+    // ResultView prints values with the bitmap font — keep them ASCII
+    rv.lines = rv.lines.map(([k, v2]) => [k + (typeof v2 === "string" && /[^\x00-\x7F]/.test(v2) ? "：" + v2 : ""), /[^\x00-\x7F]/.test(v2) ? "" : v2]);
+  };
+
+  EL.Mediator = Mediator;
+})(window.EL);
