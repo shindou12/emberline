@@ -43,6 +43,43 @@ function play(Bal, L, D, cand, profName) {
   return { win: false, turns: 12, lost: hp0 - run.hp, m, timeout: true };
 }
 
+/* how many clearly different near-best first routes the board offers (by what they kill) */
+function options(Bal, L, cand) {
+  const prof = Bal.PROFILES.smart;
+  Bal.setProfile(prof);
+  const run = L.createRun(cand.hero, cand.seed);
+  run.companions = cand.companions.slice(); run.relics = cand.relics.slice(); run.hp = cand.hp;
+  const B = L.genBattle(run, { type: cand.kind, row: cand.row, spec: cand.spec });
+  const found = [];
+  for (const s of B.starts) {
+    B.hero = { x: s.x, y: s.y }; B.trail = [{ x: s.x, y: s.y }]; L.planTelegraphs(B);
+    let frontier = [{ route: [{ x: s.x, y: s.y }], res: null }];
+    for (let depth = 0; depth < 14 && frontier.length; depth++) {
+      const next = [];
+      for (const f of frontier) {
+        const res = f.res || L.simulate(B, run, f.route);
+        if (res.outcome !== "ok") continue;
+        const cur = f.route[f.route.length - 1];
+        const blocked = L.blockedSet(B, f.route, res.T.cold);
+        for (const [dx, dy] of L.DIRS8) {
+          const nt = { x: cur.x + dx, y: cur.y + dy };
+          if (L.stepError(B, blocked, res.T.moves, cur, nt)) continue;
+          const route = f.route.concat([nt]), r2 = L.simulate(B, run, route);
+          const sc = Bal.score(r2, B, run, prof);
+          if (!r2.endBlocked) found.push({ sc, sig: r2.events.filter((e) => e.type === "kill").map((e) => e.uid).sort().join(",") + "|" + r2.events.filter((e) => e.type === "attack").length });
+          next.push({ route, res: r2, s: sc });
+        }
+      }
+      next.sort((a, b) => b.s - a.s);
+      frontier = next.slice(0, 40);
+    }
+  }
+  if (!found.length) return 0;
+  const best = Math.max(...found.map((f) => f.sc));
+  return new Set(found.filter((f) => f.sc >= best - 20).map((f) => f.sig)).size;
+}
+const FACING = ["knight", "archer", "herald", "shield"];
+
 function candidate(L, D, seed) {
   const rng = L.rngFrom(seed * 7919 + 17);
   const heroes = ["kai", "rue", "gorm"], comps = Object.keys(D.COMPANIONS);
@@ -65,18 +102,26 @@ function evaluate(cand) {
   const r = {};
   for (const p of ["smart", "greedy", "naive"]) r[p] = play(Bal, L, D, cand, p);
   const s = r.smart, used = Object.entries(s.m).filter(([k, v]) => v > 0 && k !== "counter").map(([k]) => k);
+  const opts = options(Bal, L, cand);
+  const facing = cand.spec.enemies.filter((e) => FACING.includes(e.type)).length;
+  // v2 (after the first blind test): a good board is solved in about two turns by a good route,
+  // offers several near-best openings, does not grind a good player down, and is not walled
+  // in by enemies that only take blows from one side
   let score = 0;
   if (!s.win) score -= 100;
-  if (s.turns >= 2 && s.turns <= 5) score += 12;
-  if (s.turns === 1) score -= 15;
-  score += Math.min(12, s.lost) * 0.8; // it should cost something even played well
-  score += (r.greedy.win ? r.greedy.lost - s.lost : 25) * 0.8;
-  score += (r.naive.win ? r.naive.lost - s.lost : 20) * 0.4;
-  score += used.length * 6;
-  return Object.assign({}, cand, { score: Math.round(score), used, bots: { smart: { win: s.win, turns: s.turns, lost: s.lost }, greedy: { win: r.greedy.win, turns: r.greedy.turns, lost: r.greedy.lost }, naive: { win: r.naive.win, turns: r.naive.turns, lost: r.naive.lost } } });
+  score += { 1: -20, 2: 20, 3: 8 }[s.turns] != null ? { 1: -20, 2: 20, 3: 8 }[s.turns] : -12;
+  score += Math.min(8, opts) * 3;
+  if (opts <= 1) score -= 10; // one forced line (or none) is not a puzzle
+  score -= Math.max(0, s.lost - 6) * 1.5;
+  score -= Math.max(0, facing - 1) * 6;
+  score += (r.greedy.win ? Math.max(0, r.greedy.turns - s.turns) * 3 : 6); // a careless player takes longer
+  score += used.length * 3;
+  return Object.assign({}, cand, { score: Math.round(score), used, opts, facing, bots: { smart: { win: s.win, turns: s.turns, lost: s.lost }, greedy: { win: r.greedy.win, turns: r.greedy.turns, lost: r.greedy.lost }, naive: { win: r.naive.win, turns: r.naive.turns, lost: r.naive.lost } } });
 }
 
-if (process.argv[2] === "--worker") {
+if (require.main !== module) {
+  module.exports = { evaluate };
+} else if (process.argv[2] === "--worker") {
   const [from, to] = process.argv.slice(3).map(Number);
   global.window = { EL: {} };
   require(path.join(__dirname, "../js/data.js"));
@@ -132,6 +177,6 @@ if (process.argv[2] === "--worker") {
     const blindOut = order.map((b, i) => strip(Object.assign({}, b, { id: "ABCDE"[i], name: "テスト" + "ABCDE"[i] })));
     fs.writeFileSync(path.join(__dirname, "../js/scenarios.js"), "/* EMBERLINE — lab boards picked by tools/findmaps.js (bots: smart/greedy/naive) */\nwindow.EL.Scenarios = " + JSON.stringify(picked.map(strip)) + ";\nwindow.EL.Blind = " + JSON.stringify(blindOut) + ";\n");
     console.log(`${all.length} candidates → ${picked.length} boards`);
-    for (const c of picked) console.log(`#${c.id} ${c.name} [${c.hero}] row${c.row + 1} ${c.kind} score${c.score} used:${c.used.join(",")} | smart ${c.bots.smart.win ? "W" : "L"} ${c.bots.smart.turns}T -${c.bots.smart.lost} | greedy ${c.bots.greedy.win ? "W" : "L"} -${c.bots.greedy.lost} | naive ${c.bots.naive.win ? "W" : "L"} -${c.bots.naive.lost}`);
+    for (const c of picked) console.log(`#${c.id} ${c.name} [${c.hero}] row${c.row + 1} ${c.kind} score${c.score} opts${c.opts} facing${c.facing} used:${c.used.join(",")} | smart ${c.bots.smart.win ? "W" : "L"} ${c.bots.smart.turns}T -${c.bots.smart.lost} | greedy ${c.bots.greedy.win ? "W" : "L"} -${c.bots.greedy.lost} | naive ${c.bots.naive.win ? "W" : "L"} -${c.bots.naive.lost}`);
   }
 }

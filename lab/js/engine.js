@@ -297,6 +297,12 @@ window.EL = window.EL || {};
       } else if (this.target.blocker) this.target.emit("ui.backdrop", {});
     }
     move(e) {
+      // a mouse moving with no button held: hover (enemy info on desktop)
+      if (this.active === null && e.pointerType === "mouse") {
+        const p = this.pos(e), h = this.root.hit(p.x, p.y);
+        if (h && h.node.inputKind === "route") h.node.routeInput("hover", p);
+        return;
+      }
       if (e.pointerId !== this.active) return;
       e.preventDefault();
       const p = this.pos(e);

@@ -33,6 +33,7 @@
       if (this.busy) return;
       if (this.paused) return this.pauseHandle(evt);
       if (this.v.help.visible) return this.helpHandle(evt);
+      if (t === "route.input" && d.phase === "hover") { this.hoverInfo(d); return; }
       if (t === "ui.click") {
         if (d.id === "pause") { if (["Map", "Battle.Idle", "Battle.Planned"].includes(this.state)) this.openPause(); return; }
         if (d.id === "relic") { this.toastRelic(d.relic); return; }
@@ -90,9 +91,9 @@
     /* back to the lab picker, remembering how this board went */
     labDone(result) {
       let rec = {};
-      try { rec = JSON.parse(localStorage.getItem("emberline.lab") || "{}"); } catch (_) {}
+      try { rec = JSON.parse(localStorage.getItem("emberline.lab2") || "{}"); } catch (_) {}
       if (rec[this.labCur] !== "win") rec[this.labCur] = result;
-      try { localStorage.setItem("emberline.lab", JSON.stringify(rec)); } catch (_) {}
+      try { localStorage.setItem("emberline.lab2", JSON.stringify(rec)); } catch (_) {}
       this.busy = false;
       this.wipe(async () => this.go("LabMenu"));
     }
@@ -499,16 +500,35 @@
       if (added) { S.play("step", this.route.length - 1); this.updatePreview(); }
       if (!sameTile(this.route[this.route.length - 1], tile)) { S.play("invalid"); this.hint("移動力が足りない — 撃破で回復する"); }
     }
-    enemyInfo(e) {
+    enemyInfo(e, ms) {
       const B = this.B, info = D.ENEMIES[e.type];
-      const wk = { U: "上", D: "下", L: "左", R: "右" }[e.weak];
+      const wk = L.weakSides(e).map((w) => ({ U: "上", D: "下", L: "左", R: "右" })[w]).join("・");
       const sealed = L.sealedBy(B.enemies, e);
       const tele = e.tele && !e.tangled ? `・予告${e.tele.dmg}` : "";
-      this.toast(`${info.name}　HP${e.hp}/${e.maxHp}`, `反撃${e.atk}${tele}・圧${L.enemyPressure(this.run, B, e)}・弱点：${sealed ? "封印中" : wk + "側"}${e.tangled ? "・もつれ中" : ""}\n${info.desc}`);
+      const cd = e.cdMax ? `・カウント${e.cd}` : "";
+      this.toast(`${info.name}　HP${e.hp}/${e.maxHp}`, `反撃${e.atk}${tele}${cd}・圧${L.enemyPressure(this.run, B, e)}・弱点：${sealed ? "封印中" : wk + "側"}${e.tangled ? "・もつれ中" : ""}\n${info.desc}`, null, ms || 3200);
+    }
+    /* a press on the board: held on an enemy for a moment, it explains the enemy (without moving) */
+    armPress(d) {
+      this.tapTile = d.tile; this.tapT = EL.Time.ui; this.pressShown = false;
+      clearTimeout(this.pressTimer);
+      const e = d.tile && L.enemyAt(this.B.enemies, d.tile.x, d.tile.y);
+      if (e) this.pressTimer = setTimeout(() => { if (this.tapTile && sameTile(this.tapTile, d.tile)) { this.pressShown = true; this.enemyInfo(e); } }, 380);
+    }
+    /* desktop: hovering an enemy explains it */
+    hoverInfo(d) {
+      if (!["Battle.Idle", "Battle.Planned"].includes(this.state) || !this.B || !d.tile) return;
+      const e = L.enemyAt(this.B.enemies, d.tile.x, d.tile.y);
+      const key = e ? e.uid : null;
+      if (key === this.hoverKey) return;
+      this.hoverKey = key;
+      if (e) this.enemyInfo(e, 4000);
     }
     /* a tap (short) plans a route; a long press on an enemy explains it */
     tapPlan(d) {
       const B = this.B;
+      clearTimeout(this.pressTimer);
+      if (this.pressShown) { this.pressShown = false; return; }
       if (!this.tapTile || !d.tile || !sameTile(this.tapTile, d.tile)) return;
       const e = L.enemyAt(B.enemies, d.tile.x, d.tile.y);
       if (EL.Time.ui - this.tapT > 420) { if (e) this.enemyInfo(e); return; }
@@ -1141,7 +1161,7 @@
         v.bg.theme = "map"; v.bg.pulse = 0;
         this.setHud("none");
         v.battleWorld.visible = false; v.mapView.visible = false; v.hudLayer.visible = false;
-        try { v.lab.cleared = JSON.parse(localStorage.getItem("emberline.lab") || "{}"); } catch (_) { v.lab.cleared = {}; }
+        try { v.lab.cleared = JSON.parse(localStorage.getItem("emberline.lab2") || "{}"); } catch (_) { v.lab.cleared = {}; }
         this.showOnly(["lab"]);
         S.bgm("map");
       },
@@ -1354,7 +1374,7 @@
           if (spot) { this.moveStart(spot); this.go("Battle.Dragging"); return; }
           const grabbed = (d.tile && sameTile(d.tile, B.hero)) || Math.hypot(d.px - hc.x, d.py - hc.y) < V.GEO.T * 0.85;
           if (grabbed) { this.go("Battle.Dragging"); return; }
-          this.tapTile = d.tile; this.tapT = EL.Time.ui;
+          this.armPress(d);
         } else if (d.phase === "end") {
           this.tapPlan(d);
           this.tapTile = null;
@@ -1417,7 +1437,7 @@
         if (near(tip)) this.go("Battle.Dragging", this.route);
         else if (spot) { this.setDragUI(false); this.moveStart(spot); this.go("Battle.Dragging"); }
         else if (near(B.hero)) this.go("Battle.Dragging");
-        else { this.tapTile = d.tile; this.tapT = EL.Time.ui; }
+        else { this.armPress(d); }
       },
     },
 
