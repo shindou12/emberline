@@ -571,6 +571,15 @@
     draw(ctx) { this.route.drawTop(ctx); }
   }
   V.RouteTopView = RouteTopView;
+  /* 撃破 plates ride above the route and the hero so a planned kill is never hidden */
+  class KillPlateView extends EL.Node {
+    constructor(enemies) { super("KillPlates"); this.enemies = enemies; }
+    draw(ctx) {
+      if (!this.enemies.visible) return;
+      for (const c of this.enemies.children) if (c.visible && !c.dead && c.target && c.kill && c.plate) c.drawKillPlate(ctx);
+    }
+  }
+  V.KillPlateView = KillPlateView;
   /* predicted shoves: arrow along the slide, a star where it slams, a knot where it tangles */
   RoutePreviewView.prototype.drawPushes = function (ctx) {
     for (const p of this.pushes) {
@@ -840,7 +849,6 @@
         let x = U.snap(r.x + r.s / 2 - tw / 2);
         const y = r.y + r.s - 7;
         ctx.fillStyle = C.ink; ctx.fillRect(x - 2, y - 2, tw + 4, 8);
-        this.drawKillHint(ctx, x, y, tw, pw);
         for (let i = 0; i < this.maxHp; i++) {
           let col = "#3b2240";
           if (i < shown) col = "#ff4d5e";
@@ -848,10 +856,10 @@
           ctx.fillStyle = col; ctx.fillRect(x, y, pw, pw);
           x += pw + gap;
         }
+        this.drawOutcome(ctx, U.snap(r.x + r.s / 2 - tw / 2), y, tw, pw, after);
       } else {
         const bw = this.boss ? r.s - 20 : 38, bh = this.boss ? 8 : 6;
         const x = U.snap(r.x + r.s / 2 - bw / 2), y = r.y + r.s - (this.boss ? 12 : 9);
-        this.drawKillHint(ctx, x, y, bw, bh);
         ctx.fillStyle = C.ink; ctx.fillRect(x - 2, y - 2, bw + 4, bh + 4);
         ctx.fillStyle = "#3b2240"; ctx.fillRect(x, y, bw, bh);
         ctx.fillStyle = this.phase2 ? "#ff8a2a" : "#ff4d5e"; ctx.fillRect(x, y, Math.round((bw * Math.max(0, this.shownHp)) / this.maxHp), bh);
@@ -862,19 +870,32 @@
         }
         ctx.fillStyle = "#ffffff"; ctx.fillRect(x, y, bw, 2);
         ctx.globalAlpha = 0.25; ctx.fillStyle = "#000"; ctx.fillRect(x, y, bw, 2); ctx.globalAlpha = 1;
+        this.drawOutcome(ctx, x, y, bw, bh, after);
         A.text(ctx, String(shown), x + bw + 2, y - 3, { s: 1, color: C.cream });
         if (this.boss && this.phase2) A.text(ctx, "AWAKEN", r.x + r.s / 2, r.y - 10, { s: 2, align: "center", color: "#ff8a2a" });
       }
     }
-    /* before any route is drawn: a glowing frame and a skull on the HP bar of enemies one blow can
-       finish (white: any hit, weak-side colour: only from the weak side) */
-    drawKillHint(ctx, x, y, w, h) {
-      if (!this.killHint || this.target) return;
-      const col = this.killHint === 2 ? "#fff6df" : C.weak, on = 0.75 + 0.25 * Math.sin(this.t / 160);
-      ctx.globalAlpha = on; ctx.fillStyle = col; ctx.fillRect(x - 4, y - 4, w + 8, h + 8); ctx.globalAlpha = 1;
-      ctx.fillStyle = C.ink; ctx.fillRect(x - 13, y - 5, 10, 10);
-      ctx.fillStyle = col; ctx.fillRect(x - 12, y - 4, 8, 8);
-      A.spr(ctx, "i_skull", x - 8, y + 4, { s: 1 });
+    /* what the planned route leaves: a struck-out bar for a kill, the HP left otherwise */
+    drawOutcome(ctx, x, y, w, h, after) {
+      if (!this.target || this.dmg == null || this.pushOnly && !this.dmg) return;
+      if (this.kill) {
+        this.plate = { x: x + w / 2, y: y + h / 2 };
+      } else if (after > 0) {
+        const tx = x + w + 4, ty = y - 5;
+        ctx.fillStyle = C.ink; ctx.fillRect(tx - 1, ty - 1, 26, 12);
+        ctx.fillStyle = "#3b2240"; ctx.fillRect(tx, ty, 24, 10);
+        A.jp(ctx, "残" + after, tx + 12, ty - 2, { size: 12, align: "center", color: C.cream, ow: 1 });
+      }
+    }
+    /* a kill: the bar is covered by a red 撃破 plate with a skull (drawn by KillPlateView) */
+    drawKillPlate(ctx) {
+      const pw = 46, ph = 16, bob = Math.floor(this.t / 260) % 2;
+      const px = U.snap(this.plate.x - pw / 2), py = U.snap(this.plate.y - ph / 2) - bob;
+      ctx.fillStyle = C.ink; ctx.fillRect(px - 2, py - 2, pw + 4, ph + 4);
+      ctx.fillStyle = Math.floor(this.t / 160) % 2 ? "#ff4d5e" : "#d8303f"; ctx.fillRect(px, py, pw, ph);
+      ctx.fillStyle = "#ffb0b8"; ctx.fillRect(px, py, pw, 2);
+      A.spr(ctx, "i_skull", px + 9, py + ph - 1, { s: 2, ax: 0.5, ay: 1 });
+      A.jp(ctx, "撃破", px + 30, py - 1, { size: 12, align: "center", color: "#fff6df", ow: 1 });
     }
     drawTarget(ctx, r) {
       const k = (Math.sin(this.t / 90) + 1) / 2;
@@ -914,15 +935,38 @@
     tileFlash(tx, ty, color, life) { this.prims.push({ k: "tile", tx, ty, color, t: 0, life: life || 300 }); }
     rays(x, y, n, len, color, life) { this.prims.push({ k: "rays", x, y, n, len, color, t: 0, life: life || 360, rot: Math.random() * 6 }); }
     ghost(sprite, x, y, flip, color) { this.prims.push({ k: "ghost", sprite, x, y, flip, color, t: 0, life: 220 }); }
-    shatter(sprite, cx, bottom, s, flip, tint) {
-      for (const ch of A.chunks(sprite, cx, bottom, s || 2, flip)) {
+    /* the sprite breaks into square blocks that tumble, land and settle (step 3 = chunkier) */
+    shatter(sprite, cx, bottom, s, flip, tint, step) {
+      s = s || 2; step = step || 2;
+      for (const ch of A.chunks(sprite, cx, bottom, s, flip, step)) {
         const a = Math.atan2(ch.y - (bottom - 16), ch.x - cx) + U.rand(-0.4, 0.4);
         const sp = U.rand(60, 220);
-        this.add({ x: ch.x, y: ch.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 80, ay: 420, drag: 0.02, life: U.rand(380, 720), size: (s || 2) * 2, color: tint || ch.color, shrink: false });
+        this.block(ch.x, ch.y, Math.cos(a) * sp, Math.sin(a) * sp - 110, s * step, tint || ch.color, bottom + U.rand(-2, 10), [560, 1000]);
       }
+    }
+    /* chunky debris from a rect: the same crumble, for walls, plates, bombs and cooling embers */
+    crumble(x, y, w, h, palette, o = {}) {
+      const bs = o.block || 6, n = o.n || Math.max(3, Math.round((w * h) / (bs * bs * 2)));
+      const floor = o.floor != null ? o.floor : y + h + 4, spr = o.spread != null ? o.spread : 1.6;
+      for (let i = 0; i < n; i++) {
+        const px = x + U.rand(0, Math.max(0, w - bs)), py = y + U.rand(0, Math.max(0, h - bs));
+        const a = o.angle != null ? o.angle + U.rand(-spr / 2, spr / 2) : Math.atan2(py - (y + h / 2), px - (x + w / 2)) + U.rand(-0.5, 0.5);
+        const sp = U.rand(o.speed ? o.speed[0] : 50, o.speed ? o.speed[1] : 170);
+        this.block(px, py, Math.cos(a) * sp, Math.sin(a) * sp - (o.lift != null ? o.lift : 90), U.pick([bs, bs, bs - 2]), U.pick(palette), floor + U.rand(-3, 6), o.life);
+      }
+    }
+    block(x, y, vx, vy, size, color, floor, life) {
+      this.add({ x, y, vx, vy, ay: 560, drag: 0.01, life: U.rand(life ? life[0] : 520, life ? life[1] : 900), size, color, shrink: false, floor });
     }
     tick(dt) {
       super.tick(dt);
+      // blocks hit the floor, hop once or twice and settle
+      for (const p of this.ps) {
+        if (p.floor == null || p.y < p.floor || p.vy <= 0) continue;
+        p.y = p.floor;
+        if (p.vy < 90) { p.vy = 0; p.ay = 0; p.vx = 0; continue; }
+        p.vy *= -0.34; p.vx *= 0.5;
+      }
       for (const p of this.prims) p.t += dt;
       this.prims = this.prims.filter((p) => p.t < p.life);
     }

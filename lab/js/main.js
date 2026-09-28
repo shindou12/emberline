@@ -31,6 +31,7 @@
     v.enemies = depth.add(new EL.Node("Enemies"));
     v.units = depth.add(new EL.Node("Units")); // companions + player
     v.routeTop = battleWorld.add(new V.RouteTopView(v.route)); // route x-ray above units
+    battleWorld.add(new V.KillPlateView(v.enemies)); // planned kills stay readable over the route
     v.fx = battleWorld.add(new V.FXView("BattleEffects"));
     v.mapView = worldLayer.add(new V.MapView());
 

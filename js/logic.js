@@ -725,12 +725,12 @@
             if (!weak && has(run, "oath") && T.attacks === 0) { weak = true; forced = true; relicFx("oath"); }
             if (weak) relicFx("dirk");
             T.attacks++;
-            let dmg = base;
+            let dmg = base, armored = false;
             if (weak) { dmg = Math.floor(dmg * S.weakMult); T.weakHits++; }
             // heavy armour: a blow into its face is halved
-            else if (D.ENEMIES[e.type].armor && !diag && entrySide(a, b) === OPP[e.weak]) dmg = Math.ceil(dmg / 2);
+            else if (D.ENEMIES[e.type].armor && !diag && entrySide(a, b) === OPP[e.weak]) { dmg = Math.ceil(dmg / 2); armored = true; }
             rec.attacks.push({ uid: e.uid, dmg, weak, forced, sealed, kill: e.hp - dmg <= 0, bonus });
-            damage(e, dmg, "hero", rec, { weak, forced, sealed, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
+            damage(e, dmg, "hero", rec, { weak, forced, sealed, armored, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
             const moved = !done && e.alive ? shove(e, d, rec) : false;
             // counterattack: a straight (non-diagonal) hit on a shielded side that leaves it standing
             if (!done && e.alive && !weak && !diag && e.atk > 0 && !e.tangled && moved && has(run, "aegis")) relicFx("aegis");

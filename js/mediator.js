@@ -293,9 +293,6 @@
         ev.flip = e.weak === "L";
         ev.tangled = !!e.tangled;
         ev.cd = e.cd || 0; ev.cdPrev = null;
-        // one blow finishes it? (2: any hit, 1: only from the weak side)
-        const st = L.stats(this.run);
-        ev.killHint = e.hp <= st.atk ? 2 : !ev.sealed && e.hp <= Math.floor(st.atk * st.weakMult) ? 1 : 0;
         ev.tx = e.x; ev.ty = e.y;
       }
       this.layoutStacks();
@@ -672,7 +669,7 @@
         v.floats.spawn(ev.dmg, hx, hy - 30, { s: 4, color: C.weak, grad: "#ffffff", life: 900, vy: -80 });
         v.floats.spawn(ev.forced ? "WEAK!!" : "WEAK!", hx, hy - 58, { s: 2, color: C.emberL, life: 800, vy: -50 });
         // shield shards fly off the open flank
-        v.fx.burst(hx - ev.dir[0] * 16, hy - ev.dir[1] * 16, 12, { angle: ang + Math.PI, spread: 2.2, speed: [60, 180], life: [300, 600], palette: ["#7c86a3", "#d3dbea", "#3b3350"], size: 4, ay: 300 });
+        v.fx.crumble(hx - ev.dir[0] * 16 - 10, hy - ev.dir[1] * 16 - 10, 20, 20, ["#7c86a3", "#d3dbea", "#3b3350", "#7c86a3"], { block: 6, n: 8, angle: ang + Math.PI, spread: 2.2, speed: [60, 190], lift: 120, floor: r.y + r.s + 2 });
         v.vignette.orange = 0.22; EL.tween(v.vignette, { orange: 0 }, 220, { clock: "ui" });
         S.play("weak");
         if (Math.random() < 0.5) S.voice(this.run.heroId);
@@ -681,6 +678,10 @@
       } else {
         v.floats.spawn(ev.dmg, hx, hy - 30, { s: 3, color: C.cream, life: 750 });
         if (ev.sealed) v.floats.spawn("封印", hx, hy - 54, { kind: "jp", color: "#c9b3ff", life: 700, vy: -30 });
+        if (ev.armored) {
+          v.fx.crumble(hx - 10, hy - 10, 20, 20, ["#b8862e", "#ffd35a", "#6e4a1a"], { block: 6, n: 6, angle: ang + Math.PI, spread: 1.8, speed: [60, 170], lift: 110, floor: r.y + r.s + 2 });
+          v.floats.spawn("装甲", hx, hy - 54, { kind: "jp", color: "#ffd35a", life: 700, vy: -30 });
+        }
         if (ev.bonus) v.floats.spawn("+" + ev.bonus, hx + 22, hy - 44, { s: 2, color: C.move, life: 600, vy: -40 });
         S.play("slash");
         EL.hitstop(55);
@@ -726,6 +727,7 @@
       const v = this.v, c = tc(ev.x, ev.y);
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) v.fx.tileFlash(ev.x + dx, ev.y + dy, "rgba(255,120,40,0.6)", 380);
       v.fx.burst(c.x, c.y, 50, { speed: [60, 260], life: [300, 700], palette: [C.ember, C.emberL, "#ff4d5e", C.cream], sizes: [2, 4], glow: true });
+      v.fx.crumble(c.x - 20, c.y - 20, 40, 40, [C.ember, "#c24a12", "#5c5058", "#8a7f86", C.emberL], { block: 6, n: 16, speed: [90, 260], lift: 160, floor: c.y + 26 });
       v.postfx.flashLight(c.x, c.y, 220, "255,140,60", 1, 500);
       S.play("fire"); this.cam.shake(8, 260); EL.hitstop(90);
       await EL.wait(160);
@@ -769,6 +771,8 @@
       evw.flash = 1; EL.tween(evw, { flash: 0 }, 200);
       evw.hp = ev.hp;
       v.fx.ring(cx, cy, 26, "#ffd35a", 260, 3);
+      const rubble = ev.reason === "ember" ? [C.ember, C.emberL, "#5c5058"] : ev.reason === "blast" ? [C.ember, "#c24a12", "#5c5058"] : ["#8a7f86", "#5c5058", "#c9b3a0", "#3b3350"];
+      v.fx.crumble(cx - 16, cy - 4, 32, 16, rubble, { block: 6, n: 7, speed: [50, 150], lift: 130, floor: r.y + r.s + 2 });
       v.fx.burst(cx, cy, 16, { speed: [60, 200], life: [200, 420], palette: ["#fff6df", "#ffd35a", "#ffb020"], sizes: [2, 4], glow: true });
       v.postfx.flashLight(cx, cy, 110, "255,210,120", 0.8, 240);
       v.floats.spawn(ev.dmg, cx + 10, cy - 26, { s: 3, color: "#ffd35a", life: 700 });
@@ -801,7 +805,7 @@
       evw.flash = 1;
       await EL.wait(40);
       evw.dead = true;
-      v.fx.shatter(evw.sprite, cx, bottom, evw.boss ? 3 : 2, evw.flip);
+      v.fx.shatter(evw.sprite, cx, bottom, evw.boss ? 3 : 2, evw.flip, null, evw.boss ? 2 : 3);
       v.fx.ring(cx, r.y + r.s / 2, evw.boss ? 70 : 34, C.emberL, 420, 4);
       v.fx.burst(cx, r.y + r.s / 2, 26 + Math.min(6, ev.chain || 1) * 4, { speed: [40, 220], life: [400, 900], palette: [C.ember, C.emberL, "#c24a12", C.cream], sizes: [2, 4], ay: -90, drag: 0.03, glow: true });
       const ck = Math.min(6, ev.chain || 1);
@@ -1000,6 +1004,7 @@
         v.postfx.flashLight(r.x + r.s / 2, r.y + r.s / 2, 340, "255,60,80", 1, 1100);
         v.fx.rays(r.x + r.s / 2, r.y + r.s / 2, 20, 150, "#ff4d5e", 900);
         v.fx.burst(r.x + r.s / 2, r.y + r.s / 2, 50, { speed: [60, 260], life: [500, 1100], palette: ["#ff4d5e", "#ff8a2a", "#7af0ff"], sizes: [2, 4], glow: true, ay: -60 });
+        v.fx.crumble(r.x + 8, r.y + 8, r.s - 16, r.s - 16, ["#5c5058", "#8a7f86", "#3b3350", "#ff8a2a"], { block: 6, n: 22, speed: [80, 240], lift: 150, floor: r.y + r.s + 4 });
       }
       v.bg.pulse = 1; EL.tween(v.bg, { pulse: 0.4 }, 900, { clock: "ui" });
       await this.banner("AWAKEN", "灰冠が覚醒した — 手下が増え、灰の波が強まる", "#ff8a2a", 1300);
@@ -1057,7 +1062,7 @@
             const tr = v.footprints.trail;
             for (let k = 0; k < n; k++) {
               const t = tr[k];
-              if (t) { v.footprints.ashes.push({ x: t.x, y: t.y, t: -k * 40 }); const c = tc(t.x, t.y); v.fx.burst(c.x, c.y, 3, { speed: [5, 25], life: [400, 800], palette: ["#8a7f86", "#5c5058"], size: 2, angle: -Math.PI / 2, spread: 1, ay: -30 }); }
+              if (t) { v.footprints.ashes.push({ x: t.x, y: t.y, t: -k * 40 }); const c = tc(t.x, t.y); v.fx.burst(c.x, c.y, 3, { speed: [5, 25], life: [400, 800], palette: ["#8a7f86", "#5c5058"], size: 2, angle: -Math.PI / 2, spread: 1, ay: -30 }); v.fx.crumble(c.x - 12, c.y - 8, 24, 12, ["#5c5058", "#8a7f86", C.ember, "#3b3350"], { block: 4, n: 4, speed: [20, 70], lift: 110, floor: c.y + 10 }); }
             }
             v.footprints.trail = tr.slice(n);
             this.coolPreview();

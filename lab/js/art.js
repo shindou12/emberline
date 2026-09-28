@@ -737,13 +737,13 @@
         for (let xx = ((yy / 2 + phase) % 2) * 2; xx < w; xx += 4) ctx.fillRect(x + xx, y + yy, 2, 2);
     },
     /* sprite pixels → list of 2x2 chunks for shatter effects */
-    chunks(name, cx, cy, s = 2, flip = false) {
+    chunks(name, cx, cy, s = 2, flip = false, step = 2) {
       const sp = SPR[name];
       if (!sp) return [];
       const out = [];
       const ox = cx - (sp.w * s) / 2, oy = cy - sp.h * s;
-      for (let y = 0; y < sp.h; y += 2)
-        for (let x = 0; x < sp.w; x += 2) {
+      for (let y = 0; y < sp.h; y += step)
+        for (let x = 0; x < sp.w; x += step) {
           const ch = sp.rows[y][flip ? sp.w - 1 - x : x];
           if (ch === "." || !PAL[ch]) continue;
           out.push({ x: ox + x * s, y: oy + y * s, color: PAL[ch] });
