@@ -1641,8 +1641,7 @@
       const bob = Math.round(Math.sin(this.t / 600) * 2) * 2;
       A.text(ctx, "EMBER", 180, 150 + bob, { s: 7, align: "center", color: C.ember, grad: C.emberL, outline: "#2a0a10" });
       A.text(ctx, "LINE", 180, 214 + bob, { s: 7, align: "center", color: C.emberL, grad: C.cream, outline: "#2a0a10" });
-      A.jp(ctx, "燈 路 の 行 軍", 180, 284, { size: 32, align: "center", color: C.cream });
-      A.jp(ctx, "指で描いた道が、そのまま刃になる。", 180, 330, { size: 16, align: "center", color: C.dim });
+      A.jp(ctx, "指で描いた道が、そのまま刃になる。", 180, 300, { size: 16, align: "center", color: C.dim });
       if (this.record) A.jp(ctx, this.record, 180, 604, { size: 16, align: "center", color: C.mute });
     }
   }
