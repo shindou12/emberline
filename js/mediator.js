@@ -106,6 +106,7 @@
       const v = this.v, run = this.run;
       const h = D.HEROES[run.heroId];
       v.playerHUD.sprite = h.sprite; v.playerHUD.name = `${h.name}`;
+      v.playerHUD.atkOf = (hp) => L.stats(run, hp); v.playerHUD.baseAtk = h.atk;
       v.playerHUD.hp = run.hp; v.playerHUD.maxHp = run.maxHp; v.playerHUD.prev = null;
       v.relicHUD.setRelics(run.relics);
       v.companionHUD.cards.forEach((c, i) => {
@@ -964,6 +965,19 @@
       S.play("relic"); v.relicHUD.fresh = "plume";
       await EL.wait(500);
     }
+    /* a relic just worked: its icon hops in the relic row and its name rises over the hero */
+    async ev_relicFx(ev) {
+      const v = this.v, h = v.hero, r = D.RELICS[ev.id];
+      if (!r) return;
+      v.relicHUD.pulse(ev.id);
+      // the name appears under the relic row (stacked when several fire together), away from the hit numbers
+      const now = EL.Time.ui, i = Math.max(0, v.relicHUD.ids.indexOf(ev.id));
+      this.relicFloats = (this.relicFloats || []).filter((t) => now - t < 700);
+      const k = this.relicFloats.push(now) - 1;
+      v.floats.spawn(r.name, Math.min(300, 6 + i * 23 + 40), 96 + k * 18, { kind: "jp", size: 12, color: C.gold, life: 1100, vy: -8, screen: true });
+      S.play("hover");
+      await EL.wait(60);
+    }
     async ev_relic(ev) {
       const v = this.v, h = v.hero;
       v.floats.spawn("+2 MOVE", h.x, h.y - 56, { s: 2, color: C.heal, life: 800 });
@@ -1085,6 +1099,7 @@
             break;
           }
           case "revive": await this.ev_revive(ev); break;
+          case "relicFx": await this.ev_relicFx(ev); break;
           case "cdTick": { const w = this.enemyViews[ev.uid]; if (w) { w.cd = ev.cd; w.cdPop = 1; EL.tween(w, { cdPop: 0 }, 260, { clock: "ui" }); } await EL.wait(90); break; }
           case "cdAct": {
             const w = this.enemyViews[ev.uid];

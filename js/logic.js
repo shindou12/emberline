@@ -451,8 +451,10 @@
       forcedWeak: 0, uses: {}, marks: {}, dirs: [], straight: 0, route: [route[0]],
       compassUsed: false, plumeUsed: run.plumeUsed, bumps: 0, tangles: 0, multi: 0,
       cold: new Set(), coldAt: [false], hitCount: {}, touched: new Set(),
-      delayed: new Set(), shot: new Set(),
+      delayed: new Set(), shot: new Set(), relicShown: new Set(),
     };
+    // a relic that just did something (once per route each, for the HUD)
+    const relicFx = (id) => { if (!has(run, id) || T.relicShown.has(id)) return; T.relicShown.add(id); push({ type: "relicFx", id }); };
     const events = [], steps = [];
     let outcome = "ok", last = 0, done = false;
     const alive = () => st.enemies.filter((e) => e.alive);
@@ -469,8 +471,9 @@
       // the first kill of a route refunds in full, later kills one less
       let refund = stats(run, T.hp).refund - (T.kills > 1 ? BAL.refundDecay : 0);
       let bonusHeal = 0;
-      if (has(run, "chain") && T.chain >= 3) { refund += 1; bonusHeal = 1; }
-      if (has(run, "rope") && e.tangled) refund += 1;
+      if (has(run, "chain") && T.chain >= 3) { refund += 1; bonusHeal = 1; relicFx("chain"); }
+      if (has(run, "rope") && e.tangled) { refund += 1; relicFx("rope"); }
+      relicFx("fang");
       T.moves += refund;
       push({ type: "kill", uid: e.uid, refund, chain: T.chain, moves: T.moves, src, x: e.x, y: e.y, size: e.size });
       if (bonusHeal) heal(bonusHeal);
@@ -500,14 +503,15 @@
       push({ type: "guard", uid: e.uid, dmg, hp: Math.max(0, T.hp), kind: kind || "counter" });
       if (rec && kind) rec.guards.push({ uid: e.uid, dmg, kind });
       if (T.hp <= 0) {
-        if (has(run, "plume") && !T.plumeUsed) { T.plumeUsed = true; T.hp = 10; push({ type: "revive", hp: 10 }); }
+        if (has(run, "plume") && !T.plumeUsed) { T.plumeUsed = true; T.hp = 10; relicFx("plume"); push({ type: "revive", hp: 10 }); }
         else { outcome = "dead"; push({ type: "heroDown" }); done = true; }
       }
     }
 
     function counter(e, rec) {
-      if (T.guardBlock > 0) { T.guardBlock--; push({ type: "guardBlocked", uid: e.uid, reason: "guard" }); rec.guards.push({ uid: e.uid, blocked: true }); return; }
+      if (T.guardBlock > 0) { T.guardBlock--; if (run.heroId !== "gorm" || T.guardBlock === 0) relicFx("shade"); push({ type: "guardBlocked", uid: e.uid, reason: "guard" }); rec.guards.push({ uid: e.uid, blocked: true }); return; }
       const dmg = Math.max(0, e.atk - (has(run, "gauntlet") ? 1 : 0));
+      if (has(run, "gauntlet") && e.atk > 0) relicFx("gauntlet");
       if (!dmg) return;
       T.guardHits++;
       rec.guards.push({ uid: e.uid, dmg });
@@ -538,6 +542,8 @@
       }
       // momentum: the more moves you still carry, the harder the slam
       const bump = (BAL.bump + Math.floor(T.moves * BAL.bumpPerMove)) * (has(run, "impact") ? 2 : 1);
+      if (stop) relicFx("impact");
+      if (path.length > pushDist(run) - 1 && has(run, "brawn")) relicFx("brawn");
       push({ type: "push", uid: e.uid, from, path, stop, dir: d, bump: stop ? bump : 0 });
       rec.pushes.push({ uid: e.uid, from, path, stop, dir: d, bump: stop ? bump : 0 });
       if (!stop) return path.length > 0;
@@ -550,6 +556,7 @@
       members.forEach((m) => (m.tangled = true));
       push({ type: "tangle", uid: e.uid, x: e.x, y: e.y, uids: members.map((m) => m.uid), pile: stop === "tangle", reason: stop });
       const extra = stop === "ember" && has(run, "emberhand") ? 2 : 0;
+      if (extra) relicFx("emberhand");
       damage(e, bump + extra, "bump", rec, { reason: stop });
       if (stop === "tangle" || stop === "full" || stop === "boss") {
         const o = stop === "boss" ? other.find((x) => x.boss) : other[0];
@@ -677,7 +684,8 @@
         const S = stats(run, T.hp);
         let bonus = 0;
         if (run.heroId === "rue") bonus += Math.min(3, T.straight - 1);
-        if (has(run, "sigil") && T.straight - 1 >= 3) bonus += 2;
+        if (has(run, "sigil") && T.straight - 1 >= 3) { bonus += 2; relicFx("sigil"); }
+        if (has(run, "heart") && T.hp <= run.maxHp / 2) relicFx("heart");
         const base = S.atk + bonus;
         const tangled = hereE.length > 1 || hereE.some((e) => e.tangled);
         if (tangled) {
@@ -714,7 +722,8 @@
             const sealed = sealedBy(st.enemies, e);
             let weak = !sealed && isWeakEntry(e, a, b), forced = false;
             if (!weak && T.forcedWeak > 0) { weak = true; forced = true; T.forcedWeak--; }
-            if (!weak && has(run, "oath") && T.attacks === 0) { weak = true; forced = true; }
+            if (!weak && has(run, "oath") && T.attacks === 0) { weak = true; forced = true; relicFx("oath"); }
+            if (weak) relicFx("dirk");
             T.attacks++;
             let dmg = base;
             if (weak) { dmg = Math.floor(dmg * S.weakMult); T.weakHits++; }
@@ -724,6 +733,7 @@
             damage(e, dmg, "hero", rec, { weak, forced, sealed, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
             const moved = !done && e.alive ? shove(e, d, rec) : false;
             // counterattack: a straight (non-diagonal) hit on a shielded side that leaves it standing
+            if (!done && e.alive && !weak && !diag && e.atk > 0 && !e.tangled && moved && has(run, "aegis")) relicFx("aegis");
             if (!done && e.alive && !weak && !diag && e.atk > 0 && !e.tangled && !(moved && has(run, "aegis"))) counter(e, rec);
             if (done) break;
           }
@@ -798,7 +808,7 @@
       run.hp -= dmg;
       push(Object.assign({ type: "heroHit", total: dmg, reduced: 0, hp: Math.max(0, run.hp) }, extra || {}));
       if (run.hp <= 0) {
-        if (has(run, "plume") && !run.plumeUsed) { run.plumeUsed = true; run.hp = 10; push({ type: "revive", hp: 10 }); return false; }
+        if (has(run, "plume") && !run.plumeUsed) { run.plumeUsed = true; run.hp = 10; push({ type: "relicFx", id: "plume" }); push({ type: "revive", hp: 10 }); return false; }
         run.hp = 0; push({ type: "heroDown" }); return true;
       }
       return false;
@@ -817,6 +827,7 @@
         }
         if (!adj) continue;
         e.hp -= 2;
+        if (!events.some((x) => x.type === "relicFx" && x.id === "scorch")) push({ type: "relicFx", id: "scorch" });
         push({ type: "scorch", uid: e.uid, dmg: 2, hp: Math.max(0, e.hp) });
         if (e.hp <= 0) { e.alive = false; run.stats.kills++; push({ type: "kill", uid: e.uid, refund: 0, chain: 0, src: "scorch", x: e.x, y: e.y, size: e.size }); }
       }
@@ -851,12 +862,13 @@
       if (p > 0) { push({ type: "pressure", uid: e.uid, dmg: p }); total += p; }
     }
     let reduced = 0;
-    if (has(run, "afterglow") && B.lastT) { reduced = Math.min(total, Math.max(0, B.lastT.moves)); total -= reduced; }
+    if (has(run, "afterglow") && B.lastT) { reduced = Math.min(total, Math.max(0, B.lastT.moves)); total -= reduced; if (reduced) push({ type: "relicFx", id: "afterglow" }); }
+    if (has(run, "coal") && alive().some((e) => e.pressure > 0)) push({ type: "relicFx", id: "coal" });
     if (total > 0 || reduced > 0) {
       run.hp -= total;
       push({ type: "heroHit", total, reduced, hp: Math.max(0, run.hp) });
       if (run.hp <= 0) {
-        if (has(run, "plume") && !run.plumeUsed) { run.plumeUsed = true; run.hp = 10; push({ type: "revive", hp: 10 }); }
+        if (has(run, "plume") && !run.plumeUsed) { run.plumeUsed = true; run.hp = 10; push({ type: "relicFx", id: "plume" }); push({ type: "revive", hp: 10 }); }
         else { run.hp = 0; push({ type: "heroDown" }); return events; }
       }
     }

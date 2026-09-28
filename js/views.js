@@ -1268,6 +1268,14 @@
       A.panel(ctx, 6, 6, 44, 44, { fill: "#2b1d3d" });
       A.spr(ctx, this.sprite, 28, 44, { s: 2, white: this.flash });
       A.jp(ctx, this.name, 58, 6, { size: 16, color: C.cream });
+      // attack: the hero's blow before weak-side and route bonuses (relics and HP-based effects included)
+      if (this.atkOf) {
+        const st = this.atkOf(Math.max(0, Math.round(this.prev != null ? this.prev : this.hp)));
+        const ax = 58 + 16 * this.name.length + 10, hot = st.atk > this.baseAtk;
+        A.spr(ctx, "i_sword", ax + 7, 23, { s: 2 });
+        A.text(ctx, String(st.atk), ax + 18, 8, { s: 2, color: hot ? C.emberL : C.cream });
+        A.jp(ctx, "弱点×" + st.weakMult, ax + 18 + 12 * String(st.atk).length + 4, 8, { size: 12, color: C.weak, ow: 1 });
+      }
       const x = 58, y = 30, w = 112, h = 12;
       ctx.fillStyle = C.ink; ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
       ctx.fillStyle = "#3b1a28"; ctx.fillRect(x, y, w, h);
@@ -1298,7 +1306,9 @@
   V.TurnHUD = TurnHUD;
 
   class RelicHUD extends EL.Node {
-    constructor() { super("RelicHUD"); this.x = 6; this.y = 52; this.ids = []; this.fresh = null; this.t = 0; }
+    constructor() { super("RelicHUD"); this.x = 6; this.y = 52; this.ids = []; this.fresh = null; this.t = 0; this.pulses = {}; }
+    /* a relic just did something: its icon hops and glows */
+    pulse(id) { this.pulses[id] = this.t; }
     setRelics(ids) {
       this.ids = ids.slice();
       this.clear();
@@ -1307,8 +1317,12 @@
         b.id = "relic"; b.payload = { relic: id }; b.interactive = true; b.inputKind = "button";
         b.x = i * 23; b.w = 22; b.h = 22;
         b.draw = (ctx) => {
+          const age = this.t - (this.pulses[id] != null ? this.pulses[id] : -1e9), on = age < 900;
+          const hop = on ? -Math.round(Math.sin(Math.min(1, age / 300) * Math.PI) * 6) : 0;
+          ctx.translate(0, hop);
+          if (on) { ctx.fillStyle = Math.floor(age / 90) % 2 ? C.emberL : C.gold; ctx.fillRect(-2, -2, 26, 26); }
           ctx.fillStyle = C.ink; ctx.fillRect(0, 0, 22, 22);
-          ctx.fillStyle = b.pressed ? "#4a3a66" : "#2b2140"; ctx.fillRect(1, 1, 20, 20);
+          ctx.fillStyle = b.pressed ? "#4a3a66" : on ? "#5a4210" : "#2b2140"; ctx.fillRect(1, 1, 20, 20);
           A.spr(ctx, D.RELICS[id].icon, 11, 21, { s: 2 });
           if (this.fresh === id && Math.floor(this.t / 150) % 2) { ctx.fillStyle = "rgba(255,240,180,0.45)"; ctx.fillRect(1, 1, 20, 20); }
         };
