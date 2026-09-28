@@ -293,6 +293,9 @@
         ev.flip = e.weak === "L";
         ev.tangled = !!e.tangled;
         ev.cd = e.cd || 0; ev.cdPrev = null;
+        // one blow finishes it? (2: any hit, 1: only from the weak side)
+        const st = L.stats(this.run);
+        ev.killHint = e.hp <= st.atk ? 2 : !ev.sealed && e.hp <= Math.floor(st.atk * st.weakMult) ? 1 : 0;
         ev.tx = e.x; ev.ty = e.y;
       }
       this.layoutStacks();

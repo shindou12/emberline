@@ -840,6 +840,7 @@
         let x = U.snap(r.x + r.s / 2 - tw / 2);
         const y = r.y + r.s - 7;
         ctx.fillStyle = C.ink; ctx.fillRect(x - 2, y - 2, tw + 4, 8);
+        this.drawKillHint(ctx, x, y, tw, pw);
         for (let i = 0; i < this.maxHp; i++) {
           let col = "#3b2240";
           if (i < shown) col = "#ff4d5e";
@@ -850,6 +851,7 @@
       } else {
         const bw = this.boss ? r.s - 20 : 38, bh = this.boss ? 8 : 6;
         const x = U.snap(r.x + r.s / 2 - bw / 2), y = r.y + r.s - (this.boss ? 12 : 9);
+        this.drawKillHint(ctx, x, y, bw, bh);
         ctx.fillStyle = C.ink; ctx.fillRect(x - 2, y - 2, bw + 4, bh + 4);
         ctx.fillStyle = "#3b2240"; ctx.fillRect(x, y, bw, bh);
         ctx.fillStyle = this.phase2 ? "#ff8a2a" : "#ff4d5e"; ctx.fillRect(x, y, Math.round((bw * Math.max(0, this.shownHp)) / this.maxHp), bh);
@@ -863,6 +865,16 @@
         A.text(ctx, String(shown), x + bw + 2, y - 3, { s: 1, color: C.cream });
         if (this.boss && this.phase2) A.text(ctx, "AWAKEN", r.x + r.s / 2, r.y - 10, { s: 2, align: "center", color: "#ff8a2a" });
       }
+    }
+    /* before any route is drawn: a glowing frame and a skull on the HP bar of enemies one blow can
+       finish (white: any hit, weak-side colour: only from the weak side) */
+    drawKillHint(ctx, x, y, w, h) {
+      if (!this.killHint || this.target) return;
+      const col = this.killHint === 2 ? "#fff6df" : C.weak, on = 0.75 + 0.25 * Math.sin(this.t / 160);
+      ctx.globalAlpha = on; ctx.fillStyle = col; ctx.fillRect(x - 4, y - 4, w + 8, h + 8); ctx.globalAlpha = 1;
+      ctx.fillStyle = C.ink; ctx.fillRect(x - 13, y - 5, 10, 10);
+      ctx.fillStyle = col; ctx.fillRect(x - 12, y - 4, 8, 8);
+      A.spr(ctx, "i_skull", x - 8, y + 4, { s: 1 });
     }
     drawTarget(ctx, r) {
       const k = (Math.sin(this.t / 90) + 1) / 2;
