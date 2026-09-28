@@ -1169,14 +1169,15 @@
     constructor() { super("Banner"); this.text = ""; this.sub = ""; this.color = C.emberL; this.alpha = 0; this.band = 1; this.y = 280; this.s = 4; this.bandColor = "rgba(10,6,20,0.85)"; this.t = 0; }
     tick(dt) { this.t += dt; }
     draw(ctx) {
-      const h = 78 * this.band;
+      // the band grows with the title size, the subtitle sits under the title
+      const th = this.s * 9, full = this.sub ? Math.max(78, th + 44) : Math.max(78, th + 30), h = full * this.band;
       ctx.fillStyle = this.bandColor;
       ctx.fillRect(0, -h / 2, 360, h);
       ctx.fillStyle = this.color;
       ctx.fillRect(0, -h / 2, 360, 2); ctx.fillRect(0, h / 2 - 2, 360, 2);
-      const ty = this.sub ? -28 : -16;
+      const ty = this.sub ? -full / 2 + 11 : -th / 2 - 2;
       if (this.text) A.text(ctx, this.text, 180 + U.snap(this.tx || 0), ty, { s: this.s, align: "center", color: this.color, grad: "#ffffff" });
-      if (this.sub) A.jp(ctx, this.sub, 180, 12, { size: 16, align: "center", color: C.cream });
+      if (this.sub) A.jp(ctx, this.sub, 180, ty + th + 8, { size: 16, align: "center", color: C.cream });
     }
   }
   V.BannerView = BannerView;

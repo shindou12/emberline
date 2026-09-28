@@ -990,6 +990,24 @@
     async ev_victory() { await EL.wait(60); }
     async ev_heroDown() { await EL.wait(60); }
 
+    /* the whole board cleared by the first route: "EMBERLINE!" */
+    async oneStroke() {
+      const v = this.v, b = v.banner;
+      this.record.oneStroke = (this.record.oneStroke || 0) + 1; this.saveRecord();
+      v.vignette.white = 0.85; EL.tween(v.vignette, { white: 0 }, 700, { clock: "ui" });
+      this.cam.shake(9, 500);
+      S.play("relic"); setTimeout(() => S.play("chime"), 160);
+      // an ember storm from both edges and a ring from the centre
+      for (let i = 0; i < 10; i++) setTimeout(() => {
+        const left = i % 2 === 0;
+        v.hudFx.burst(left ? 10 : 350, U.rand(180, 420), 28, { speed: [120, 320], life: [600, 1300], angle: left ? -0.5 : Math.PI + 0.5, spread: 1.2, palette: [C.ember, C.emberL, C.cream, C.gold, "#ff4d5e"], sizes: [2, 4], ay: 60, glow: true });
+      }, i * 90);
+      v.hudFx.ring && v.hudFx.ring(180, 280, 200, C.emberL, 700, 6);
+      const s0 = b.s, bc = b.bandColor;
+      b.s = 5; b.bandColor = "rgba(60,18,4,0.92)";
+      await this.banner("EMBERLINE!", "一筆で全滅 — 1ターン制圧", "#ffd35a", 1400);
+      b.s = s0; b.bandColor = bc;
+    }
     async banner(text, sub, color, hold) {
       const b = this.v.banner;
       b.text = text; b.sub = sub || ""; b.color = color || C.emberL; b.band = 0; b.alpha = 1; b.tx = -300;
@@ -1224,7 +1242,7 @@
         v.battleWorld.visible = false; v.mapView.visible = false; v.hudLayer.visible = false;
         this.showOnly(["title"]);
         const r = this.record;
-        v.title.record = r.runs ? `挑戦 ${r.runs}回 ・ 踏破 ${r.wins || 0}回 ・ 最大連鎖 ${r.bestChain || 0}` : "";
+        v.title.record = r.runs ? `挑戦 ${r.runs}回 ・ 踏破 ${r.wins || 0}回 ・ 最大連鎖 ${r.bestChain || 0}${r.oneStroke ? ` ・ EMBERLINE ${r.oneStroke}回` : ""}` : "";
         S.bgm("map");
       },
       on(evt) {
@@ -1520,7 +1538,8 @@
         S.play("victory"); S.voice(run.heroId, "cheer");
         for (let i = 0; i < 3; i++) setTimeout(() => v.hudFx.burst(U.rand(60, 300), U.rand(200, 360), 24, { speed: [40, 200], life: [500, 1100], palette: [C.ember, C.emberL, C.cream, C.gold], sizes: [2, 4], ay: 120, glow: true }), i * 180);
         run.stats.battles++;
-        await this.banner(B.isBoss ? "CONQUERED" : "VICTORY", B.isBoss ? "灰冠の王を討ち果たした" : `撃破！ ${B.turn}ターンで制圧`, C.gold, 900);
+        if (!B.isBoss && B.turn === 1) await this.oneStroke();
+        else await this.banner(B.isBoss ? "CONQUERED" : "VICTORY", B.isBoss ? "灰冠の王を討ち果たした" : `撃破！ ${B.turn}ターンで制圧`, C.gold, 900);
         if (this.labCur) { this.labDone("win"); return; }
         if (!B.isBoss) {
           const got = L.claimObjectives(run, B);
