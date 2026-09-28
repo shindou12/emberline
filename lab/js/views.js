@@ -1829,6 +1829,9 @@
     { t: "結界柱", b: "結界柱のまわり2マス（紫の枠）にいる敵は弱点が消える。柱を倒すか、敵を枠の外へ押し出せば、ルートの途中でもすぐ弱点が戻る。", demo: "seal" },
     { t: "押し出しともつれ", b: "押された敵が壁・岩・足跡・敵にぶつかると衝突ダメージ（残り移動が多いほど強い）を受け「もつれ」る。もつれた敵は反撃せず、斬れば弱点ダメージ（斬るとほどける）。敵同士は同じマスに重なる。同じ敵を2回目以降に斬ると押すだけ。", demo: "push" },
     { t: "岩", b: "岩はマスごと塞ぐが、岩と岩の斜めのすき間は通れる。押された敵は岩や盤面の端にぶつかって止まり、もつれる。", demo: "wall" },
+    { t: "弓兵と重装兵", b: "弓兵は正面3マス（緑の列）を射る。その列に踏み込むと2ダメージ（1ルート1回）。守られた奥の敵を狙うなら、あえて受けるのもあり。重装兵は正面（金の装甲）からの攻撃が半減。回り込んで背中を斬れ。", demo: "archer" },
+    { t: "カウントダウン", b: "頭の数字は行動までのターン数。0で行動する。狙撃手はどこにいても撃ってくる、鼓手は他の敵の数字を進める、旗手は全員の正面をこちらに向ける。倒しきれなくても、斬るかぶつければ数字が1戻る。脆い敵は弱点が2つある。", demo: "count" },
+    { t: "爆ぜ殻", b: "倒すと周囲1マスが爆発し、主人公も敵も5ダメージ。余剰3以上のダメージで倒せば不発。押し出しや仲間の技で離れた所から倒すのも手。爆発で敵を巻き込むこともできる。", demo: "bomb" },
     { t: "攻撃予告", b: "骨砕きとボスは、次の敵ターンに攻撃するマスを黄色く予告する。そこで終わると被弾。押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
     { t: "撃破で移動回復", b: "敵を倒すと移動力が回復する（1ルートで最初の撃破は+2、2体目からは+1）。倒して、進んで、また倒す。長い連鎖が勝利への近道。", demo: "chain" },
     { t: "燠火の足跡", b: "歩いたマスは燃えて、しばらく入れない。斜めに交差するのはOK。敵がいたマスは燃えないので、もう一度踏み込める。仲間が増えるほど足跡は長く残る。", demo: "ember" },
@@ -1878,10 +1881,38 @@
         if (dead) { A.text(ctx, i === 0 ? "+2" : "+1", c.x, c.y - 10, { s: 2, align: "center", color: C.heal }); }
       });
       const head = path.length ? cell(...path[Math.max(0, n - 1)]) : cell(2, 5);
-      if (!["guard", "push", "tele", "seal"].includes(kind)) A.spr(ctx, "kai", head.x, head.y + 16, { s: 2 });
+      if (!["guard", "push", "tele", "seal", "archer", "count", "bomb"].includes(kind)) A.spr(ctx, "kai", head.x, head.y + 16, { s: 2 });
       if (kind === "comp" && n >= 5) { A.spr(ctx, "pip", head.x - 40, head.y + 16, { s: 2 }); ctx.fillStyle = C.emberL; A.pline(ctx, head.x, head.y, cell(4, 1).x, cell(4, 1).y, 4); }
       if (kind === "pressure") { const c = cell(2, 5); A.spr(ctx, "kai", c.x, c.y + 16, { s: 2 }); A.text(ctx, "-6", c.x, c.y - 30, { s: 3, align: "center", color: "#ff8f9b" }); }
       const fl = Math.floor(t / 200) % 2;
+      if (kind === "archer") {
+        const a = cell(1, 1);
+        for (let k = 1; k <= 3; k++) { const c = cell(1, 1 + k); ctx.globalAlpha = 0.35; ctx.fillStyle = "#4fb85a"; ctx.fillRect(c.x - 18, c.y - 18, 36, 36); ctx.globalAlpha = 1; }
+        A.spr(ctx, "archer", a.x, a.y + 16, { s: 2 });
+        const tgt = cell(1, 0); A.spr(ctx, "sniper", tgt.x, tgt.y + 16, { s: 2 });
+        const kn = cell(4, 2); A.spr(ctx, "knight", kn.x, kn.y + 16, { s: 2 });
+        ctx.fillStyle = "#b8862e"; ctx.fillRect(kn.x - 14, kn.y + 14, 28, 5);
+        ctx.fillStyle = C.weak; ctx.fillRect(kn.x - 14, kn.y - 20, 28, 4);
+        A.jp(ctx, "半減", kn.x, kn.y + 24, { size: 12, align: "center", color: "#ffd35a" });
+        A.jp(ctx, "-2", cell(1, 3).x, cell(1, 3).y - 8, { size: 16, align: "center", color: "#c8ffb0" });
+      }
+      if (kind === "count") {
+        [["sniper", 1, 1, "1", "#ff4d5e"], ["drummer", 3, 2, "2", "#ff8a2a"], ["herald", 4, 4, "3", "#ffd35a"]].forEach(([sp, x, y, n, col]) => {
+          const c = cell(x, y);
+          A.spr(ctx, sp, c.x, c.y + 16, { s: 2 });
+          ctx.fillStyle = C.ink; ctx.fillRect(c.x - 20, c.y - 24, 20, 20);
+          ctx.fillStyle = n === "1" && fl ? "#ff4d5e" : "#241c36"; ctx.fillRect(c.x - 18, c.y - 22, 16, 16);
+          A.text(ctx, n, c.x - 10, c.y - 19, { s: 2, align: "center", color: n === "1" ? "#fff" : col });
+        });
+      }
+      if (kind === "bomb") {
+        const c = cell(2, 2), k = Math.floor(t / 900) % 2;
+        if (!k) A.spr(ctx, "bomber", c.x, c.y + 16, { s: 2 });
+        else for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { ctx.globalAlpha = 0.5; ctx.fillStyle = "#ff8a2a"; ctx.fillRect(c.x + dx * 40 - 18, c.y + dy * 40 - 18, 36, 36); ctx.globalAlpha = 1; }
+        const h = cell(2, 3); A.spr(ctx, "kai", h.x, h.y + 16, { s: 2 });
+        if (k) A.jp(ctx, "-5", h.x, h.y - 30, { size: 16, align: "center", color: "#ff8f9b" });
+        const o = cell(3, 1); A.spr(ctx, "husk", o.x, o.y + 16, { s: 2 });
+      }
       if (kind === "guard") {
         const e = cell(3, 2);
         for (const [x, y] of [[3, 1], [2, 2], [4, 2]]) {

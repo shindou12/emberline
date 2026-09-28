@@ -474,6 +474,14 @@
       SPR[name][k + "F"] = f;
     }
   }
+  /* the troublesome enemies: recoloured cousins of the base cast */
+  const recolor = (rows, map) => rows.map((r) => r.replace(/./g, (ch) => (map[ch] != null ? map[ch] : ch)));
+  S.archer = recolor(S.caller, { P: "G", q: "T", p: "g", c: "y" });
+  S.sniper = recolor(S.caller, { P: "R", q: "E", p: "r", c: "y" });
+  S.knight = recolor(S.shield, { P: "3", q: "2", m: "5", M: "4", c: "r" });
+  S.drummer = recolor(S.husk, { p: "o", P: "O", q: "W", c: "y" });
+  S.herald = recolor(S.shield, { P: "Y", q: "W", m: "y", M: "o", c: "6" });
+  S.bomber = recolor(S.wisp, { c: "y", b: "o", 6: "r" });
   for (const k in S) build(k, S[k]);
   for (const k in I) build("i_" + k, I[k]);
   for (const k in N) build("n_" + k, N[k]);

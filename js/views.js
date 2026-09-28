@@ -10,6 +10,7 @@
   const tc = (x, y) => ({ x: BX + x * T + T / 2, y: BY + y * T + T / 2 });
   V.tc = tc;
   const DIRV = { U: [0, -1], R: [1, 0], D: [0, 1], L: [-1, 0] };
+  const OPPV = { U: "D", D: "U", L: "R", R: "L" };
   const ROUTE = "#aef4ff"; // the planned route: a colour nothing else on the board uses
   const hash = (x, y) => ((x * 73856093) ^ (y * 19349663)) >>> 0;
 
@@ -121,10 +122,11 @@
       this.tiles = new Array(GW * GH).fill(0);
       this.dim = 0; this.reach = null; this.entries = []; this.entryEmph = 0; this.t = 0; this.cursor = null; this.heroTile = null; this.heroHint = 0;
       this.loc = "temple";
-      this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.seals = []; this.starts = [];
+      this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.seals = []; this.starts = []; this.arrows = [];
     }
     /* raw pointer → route input event (geometry only; legality decided elsewhere) */
     routeInput(phase, p) {
+      const sp = p; // screen position, for UI drawn over the board
       const l = this.globalToLocal(p.x, p.y);
       const lx = l.x, ly = l.y;
       p = { x: lx + this.x, y: ly + this.y };
@@ -132,7 +134,7 @@
       const inside = tx >= 0 && ty >= 0 && tx < GW && ty < GH;
       const cx = tx * T + T / 2, cy = ty * T + T / 2;
       const near = inside && Math.hypot(lx - cx, ly - cy) < T * 0.34;
-      this.emit("route.input", { phase, tile: inside ? { x: tx, y: ty } : null, near, px: p.x, py: p.y });
+      this.emit("route.input", { phase, tile: inside ? { x: tx, y: ty } : null, near, px: p.x, py: p.y, sx: sp.x, sy: sp.y });
     }
     tick(dt) { this.t += dt; }
     draw(ctx) {
@@ -179,6 +181,7 @@
         }
       }
       this.drawSeals(ctx);
+      this.drawArrows(ctx);
       this.drawTeles(ctx);
       // weak-side approach pads: "charge in from here"
       if (this.entries.length) {
@@ -273,6 +276,22 @@
       ctx.fillStyle = C.ink; ctx.fillRect(tx - 1, ty - 1, 22, 12);
       ctx.fillStyle = hero ? Y : "#4a3a10"; ctx.fillRect(tx, ty, 20, 10);
       A.text(ctx, "!" + dmg, tx + 10, ty + 1, { s: 1, align: "center", color: hero ? C.ink : Y });
+      ctx.globalAlpha = 1;
+    }
+  };
+  /* archers' front lines: green dashes with a travelling arrowhead */
+  BoardView.prototype.drawArrows = function (ctx) {
+    const k = (this.t / 500) % 1;
+    for (const a of this.arrows) {
+      const px = a.x * T, py = a.y * T, v = DIRV[a.dir];
+      ctx.globalAlpha = 0.3; ctx.fillStyle = "#4fb85a"; ctx.fillRect(px + 2, py + 2, T - 4, T - 4);
+      ctx.globalAlpha = 0.95; ctx.fillStyle = "#c8ffb0";
+      // dashed border so the lane reads even on bright floors
+      for (let i = 0; i < T - 4; i += 8) { ctx.fillRect(px + 2 + i, py + 2, 4, 2); ctx.fillRect(px + 2 + i, py + T - 4, 4, 2); }
+      const cx = px + T / 2 + v[0] * (k - 0.5) * T * 0.6, cy = py + T / 2 + v[1] * (k - 0.5) * T * 0.6;
+      ctx.fillStyle = "#eaffd8";
+      if (v[0]) { ctx.fillRect(cx - 9, cy - 1, 16, 3); ctx.fillRect(cx + v[0] * 6 - 1, cy - 5, 3, 11); }
+      else { ctx.fillRect(cx - 1, cy - 9, 3, 16); ctx.fillRect(cx - 5, cy + v[1] * 6 - 1, 11, 3); }
       ctx.globalAlpha = 1;
     }
   };
@@ -648,6 +667,8 @@
       this.tangled = false; this.sox = 0; this.soy = 0; this.push = null;
       this.flash = 0; this.ox = 0; this.oy = 0; this.t = Math.random() * 1000; this.spin = 0; this.phase2 = false; this.intent = d.summons ? "summon" : null;
       this.flip = false; this.dead = false; this.lunge = 0;
+      this.cd = e.cd || 0; this.cdMax = e.cdMax || 0; this.cdPrev = null; this.act = d.act || null;
+      this.twoWeak = !!d.twoWeak; this.armor = !!d.armor; this.bomb = !!d.bomb; this.cdPop = 0;
     }
     tick(dt) { this.t += dt; this.shownHp += (this.hp - this.shownHp) * Math.min(1, dt / 90); }
     rect() { return { x: BX + this.tx * T, y: BY + this.ty * T, s: T * this.size }; }
@@ -710,6 +731,8 @@
       if (this.dead || !this.visible) return;
       const r = this.rect();
       this.drawHp(ctx, r);
+      if (this.cdMax) this.drawCountdown(ctx, r);
+      if (this.bomb) { const k = Math.floor(this.t / 180) % 2; A.spr(ctx, "i_flame", r.x + r.s - 8, r.y + 16 - k, { s: 2, ax: 0.5, ay: 1 }); }
       if (this.target) this.drawTarget(ctx, r);
     }
     drawGuards(ctx, r) {
@@ -717,7 +740,14 @@
       const sides = { U: [r.x + 6, r.y + inset, r.s - 12, th], D: [r.x + 6, r.y + r.s - inset - th, r.s - 12, th], L: [r.x + inset, r.y + 6, th, r.s - 12], R: [r.x + r.s - inset - th, r.y + 6, th, r.s - 12] };
       for (const k of ["U", "R", "D", "L"]) {
         const [x, y, w, h] = sides[k];
-        if (k === this.weak && !this.sealed) continue;
+        if ((k === this.weak || (this.twoWeak && k === OPPV[this.weak])) && !this.sealed) continue;
+        if (this.armor && k === OPPV[this.weak] && !this.sealed) {
+          // the armoured face: a thick plate with a rivet row
+          ctx.fillStyle = C.ink; ctx.fillRect(x - 3, y - 3, w + 6, h + 6);
+          ctx.fillStyle = "#b8862e"; ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+          ctx.fillStyle = "#ffd35a"; if (w > h) ctx.fillRect(x, y - 1, w, 2); else ctx.fillRect(x - 1, y, 2, h);
+          continue;
+        }
         ctx.fillStyle = C.ink; ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
         ctx.fillStyle = this.sealed ? "#7a5bc4" : "#7c86a3"; ctx.fillRect(x, y, w, h);
         ctx.fillStyle = this.sealed ? "#c9b3ff" : "#d3dbea";
@@ -731,13 +761,16 @@
         A.spr(ctx, "i_chain", r.x + r.s - 12, r.y + r.s - 6 - k * 2, { s: 2 });
         return;
       }
+      for (const wk of this.twoWeak ? [this.weak, OPPV[this.weak]] : [this.weak]) this.drawFlank(ctx, r, sides, wk);
+    }
+    drawFlank(ctx, r, sides, wk) {
       // open flank: flickering ember gap + inward chevrons
-      const [x, y, w, h] = sides[this.weak];
+      const [x, y, w, h] = sides[wk];
       const fl = 0.55 + 0.45 * Math.sin(this.t / 90);
       ctx.fillStyle = C.weak; ctx.globalAlpha = 0.5 + 0.5 * fl;
       ctx.fillRect(x, y, w, h);
       ctx.globalAlpha = 1;
-      const v = DIRV[this.weak];
+      const v = DIRV[wk];
       const spinK = this.spin > 0 ? Math.sin(this.spin * Math.PI) : 0;
       const e = 0.5 + 0.5 * this.emph;
       const phase = (this.t / 400) % 1;
@@ -766,6 +799,18 @@
         const py = v[1] !== 0 ? y + v[1] * along * 2 : y + i * 2;
         ctx.fillRect(U.snap(px) - th / 2, U.snap(py) - th / 2, th, th);
       }
+    }
+    /* the countdown: a badge that turns red and throbs when the act is one night away */
+    drawCountdown(ctx, r) {
+      const n = this.cdPrev != null ? this.cdPrev : this.cd;
+      const hot = n <= 1, beat = hot ? 0.5 + 0.5 * Math.sin(this.t / 70) : 0;
+      const col = { snipe: "#ff4d5e", drum: "#ff8a2a", rally: "#ffd35a" }[this.act] || C.cream;
+      const s = 18 + Math.round(beat * 4) + Math.round(this.cdPop * 6), bx = r.x + 2 - (s - 18) / 2, by = r.y - 4 - (s - 18) / 2;
+      ctx.fillStyle = C.ink; ctx.fillRect(bx - 2, by - 2, s + 4, s + 4);
+      ctx.fillStyle = hot ? (Math.floor(this.t / 140) % 2 ? "#ff4d5e" : "#8f2231") : "#241c36"; ctx.fillRect(bx, by, s, s);
+      ctx.fillStyle = col; ctx.fillRect(bx, by, s, 2);
+      A.text(ctx, String(n), bx + s / 2, by + s / 2 - 5, { s: 2, align: "center", color: hot ? "#ffffff" : col });
+      if (this.cdPrev != null && this.cdPrev !== this.cd) A.text(ctx, String(this.cd), bx + s + 4, by + 2, { s: 1, color: C.mute });
     }
     drawHp(ctx, r) {
       const shown = Math.max(0, Math.round(this.shownHp));
@@ -1160,6 +1205,24 @@
   }
   V.VignetteView = VignetteView;
 
+  /* a ring that fills beside the cursor (or finger) while it rests on an enemy; full = details */
+  class InspectRingView extends EL.Node {
+    constructor() { super("InspectRing"); this.p = 0; this.on = false; this.px = 0; this.py = 0; }
+    draw(ctx) {
+      if (!this.on || this.p <= 0) return;
+      const cx = this.px + 18, cy = this.py - 18, r = 11;
+      ctx.lineCap = "butt";
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = "#3a2f58"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = this.p >= 1 ? C.gold : C.cream; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, this.p)); ctx.stroke();
+      A.jp(ctx, "?", cx, cy - 8, { size: 12, align: "center", color: this.p >= 1 ? C.gold : C.dim, ow: 1 });
+    }
+  }
+  V.InspectRingView = InspectRingView;
+
   class ToastView extends EL.Node {
     constructor() { super("Notifications"); this.title = ""; this.body = ""; this.alpha = 0; this.icon = null; this.y = 386; }
     draw(ctx) {
@@ -1498,6 +1561,39 @@
   }
   V.ModalBase = ModalBase;
 
+  /* the lab: hand-picked boards and a blind test, each played on its own */
+  class LabView extends ModalBase {
+    constructor() {
+      super("Lab"); this.shade = 0.55; this.cleared = {};
+      const sc = EL.Scenarios || [], bl = EL.Blind || [];
+      const sub = { face: "#3a2f58", top: "#5a4a82", base: "#1a1428", color: C.cream, outline: C.ink, size: 12 };
+      this.picks = sc.map((s, i) => {
+        const b = this.add(new ButtonView("lab.s" + i, `${i + 1}. ${s.name.length > 9 ? s.name.slice(0, 8) + "…" : s.name}`, 164, 40, sub));
+        b.x = 12 + (i % 2) * 172; b.y = 96 + Math.floor(i / 2) * 46; return b;
+      });
+      this.blind = bl.map((s, i) => {
+        const b = this.add(new ButtonView("lab.b" + i, s.id, 58, 44, { face: "#ff8a2a", top: "#ffd35a", base: "#8a2f0a", size: 16 }));
+        b.x = 14 + i * 68; b.y = 410; return b;
+      });
+      this.titleBtn = this.add(new ButtonView("lab.title", "通常のゲームへ", 150, 36, sub));
+      this.titleBtn.x = 105; this.titleBtn.y = 580;
+    }
+    draw(ctx) {
+      super.draw(ctx);
+      A.jp(ctx, "EMBERLINE ラボ", 180, 20, { size: 24, align: "center", color: C.gold });
+      A.jp(ctx, "厳選10面（ボットが選んだ手応えのある盤面）", 180, 70, { size: 12, align: "center", color: C.dim });
+      A.jp(ctx, "評価テスト A〜E", 180, 360, { size: 16, align: "center", color: C.emberL });
+      A.jp(ctx, "遊んで、面白かった順に並べてください", 180, 384, { size: 12, align: "center", color: C.dim });
+      const mark = (b, key) => { if (this.cleared[key]) { A.text(ctx, this.cleared[key] === "win" ? "OK" : "x", b.x + b.w - 6, b.y - 4, { s: 1, align: "right", color: this.cleared[key] === "win" ? C.heal : "#ff8f9b" }); } };
+      this.picks.forEach((b, i) => mark(b, "s" + i));
+      this.blind.forEach((b, i) => mark(b, "b" + i));
+      const sc = EL.Scenarios || [];
+      A.wrap(ctx, "新しい敵：弓兵（正面3マスを射る）・重装兵（正面が硬い）・鼓手／狙撃手／旗手（数字が0で行動、斬ると1遅れる）・爆ぜ殻（倒すと爆発。余剰3以上なら不発）。敵は長押しで説明。", 320, 12).forEach((l, i) => A.jp(ctx, l, 20, 474 + i * 18, { size: 12, color: C.mute }));
+      if (!sc.length) A.jp(ctx, "盤面データがありません", 180, 200, { size: 16, align: "center", color: C.mute });
+    }
+  }
+  V.LabView = LabView;
+
   class TitleView extends ModalBase {
     constructor() {
       super("TitleScreen"); this.shade = 0;
@@ -1733,6 +1829,9 @@
     { t: "結界柱", b: "結界柱のまわり2マス（紫の枠）にいる敵は弱点が消える。柱を倒すか、敵を枠の外へ押し出せば、ルートの途中でもすぐ弱点が戻る。", demo: "seal" },
     { t: "押し出しともつれ", b: "押された敵が壁・岩・足跡・敵にぶつかると衝突ダメージ（残り移動が多いほど強い）を受け「もつれ」る。もつれた敵は反撃せず、斬れば弱点ダメージ（斬るとほどける）。敵同士は同じマスに重なる。同じ敵を2回目以降に斬ると押すだけ。", demo: "push" },
     { t: "岩", b: "岩はマスごと塞ぐが、岩と岩の斜めのすき間は通れる。押された敵は岩や盤面の端にぶつかって止まり、もつれる。", demo: "wall" },
+    { t: "弓兵と重装兵", b: "弓兵は正面3マス（緑の列）を射る。その列に踏み込むと2ダメージ（1ルート1回）。守られた奥の敵を狙うなら、あえて受けるのもあり。重装兵は正面（金の装甲）からの攻撃が半減。回り込んで背中を斬れ。", demo: "archer" },
+    { t: "カウントダウン", b: "頭の数字は行動までのターン数。0で行動する。狙撃手はどこにいても撃ってくる、鼓手は他の敵の数字を進める、旗手は全員の正面をこちらに向ける。倒しきれなくても、斬るかぶつければ数字が1戻る。脆い敵は弱点が2つある。", demo: "count" },
+    { t: "爆ぜ殻", b: "倒すと周囲1マスが爆発し、主人公も敵も5ダメージ。余剰3以上のダメージで倒せば不発。押し出しや仲間の技で離れた所から倒すのも手。爆発で敵を巻き込むこともできる。", demo: "bomb" },
     { t: "攻撃予告", b: "骨砕きとボスは、次の敵ターンに攻撃するマスを黄色く予告する。そこで終わると被弾。押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
     { t: "撃破で移動回復", b: "敵を倒すと移動力が回復する（1ルートで最初の撃破は+2、2体目からは+1）。倒して、進んで、また倒す。長い連鎖が勝利への近道。", demo: "chain" },
     { t: "燠火の足跡", b: "歩いたマスは燃えて、しばらく入れない。斜めに交差するのはOK。敵がいたマスは燃えないので、もう一度踏み込める。仲間が増えるほど足跡は長く残る。", demo: "ember" },
@@ -1782,10 +1881,38 @@
         if (dead) { A.text(ctx, i === 0 ? "+2" : "+1", c.x, c.y - 10, { s: 2, align: "center", color: C.heal }); }
       });
       const head = path.length ? cell(...path[Math.max(0, n - 1)]) : cell(2, 5);
-      if (!["guard", "push", "tele", "seal"].includes(kind)) A.spr(ctx, "kai", head.x, head.y + 16, { s: 2 });
+      if (!["guard", "push", "tele", "seal", "archer", "count", "bomb"].includes(kind)) A.spr(ctx, "kai", head.x, head.y + 16, { s: 2 });
       if (kind === "comp" && n >= 5) { A.spr(ctx, "pip", head.x - 40, head.y + 16, { s: 2 }); ctx.fillStyle = C.emberL; A.pline(ctx, head.x, head.y, cell(4, 1).x, cell(4, 1).y, 4); }
       if (kind === "pressure") { const c = cell(2, 5); A.spr(ctx, "kai", c.x, c.y + 16, { s: 2 }); A.text(ctx, "-6", c.x, c.y - 30, { s: 3, align: "center", color: "#ff8f9b" }); }
       const fl = Math.floor(t / 200) % 2;
+      if (kind === "archer") {
+        const a = cell(1, 1);
+        for (let k = 1; k <= 3; k++) { const c = cell(1, 1 + k); ctx.globalAlpha = 0.35; ctx.fillStyle = "#4fb85a"; ctx.fillRect(c.x - 18, c.y - 18, 36, 36); ctx.globalAlpha = 1; }
+        A.spr(ctx, "archer", a.x, a.y + 16, { s: 2 });
+        const tgt = cell(1, 0); A.spr(ctx, "sniper", tgt.x, tgt.y + 16, { s: 2 });
+        const kn = cell(4, 2); A.spr(ctx, "knight", kn.x, kn.y + 16, { s: 2 });
+        ctx.fillStyle = "#b8862e"; ctx.fillRect(kn.x - 14, kn.y + 14, 28, 5);
+        ctx.fillStyle = C.weak; ctx.fillRect(kn.x - 14, kn.y - 20, 28, 4);
+        A.jp(ctx, "半減", kn.x, kn.y + 24, { size: 12, align: "center", color: "#ffd35a" });
+        A.jp(ctx, "-2", cell(1, 3).x, cell(1, 3).y - 8, { size: 16, align: "center", color: "#c8ffb0" });
+      }
+      if (kind === "count") {
+        [["sniper", 1, 1, "1", "#ff4d5e"], ["drummer", 3, 2, "2", "#ff8a2a"], ["herald", 4, 4, "3", "#ffd35a"]].forEach(([sp, x, y, n, col]) => {
+          const c = cell(x, y);
+          A.spr(ctx, sp, c.x, c.y + 16, { s: 2 });
+          ctx.fillStyle = C.ink; ctx.fillRect(c.x - 20, c.y - 24, 20, 20);
+          ctx.fillStyle = n === "1" && fl ? "#ff4d5e" : "#241c36"; ctx.fillRect(c.x - 18, c.y - 22, 16, 16);
+          A.text(ctx, n, c.x - 10, c.y - 19, { s: 2, align: "center", color: n === "1" ? "#fff" : col });
+        });
+      }
+      if (kind === "bomb") {
+        const c = cell(2, 2), k = Math.floor(t / 900) % 2;
+        if (!k) A.spr(ctx, "bomber", c.x, c.y + 16, { s: 2 });
+        else for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { ctx.globalAlpha = 0.5; ctx.fillStyle = "#ff8a2a"; ctx.fillRect(c.x + dx * 40 - 18, c.y + dy * 40 - 18, 36, 36); ctx.globalAlpha = 1; }
+        const h = cell(2, 3); A.spr(ctx, "kai", h.x, h.y + 16, { s: 2 });
+        if (k) A.jp(ctx, "-5", h.x, h.y - 30, { size: 16, align: "center", color: "#ff8f9b" });
+        const o = cell(3, 1); A.spr(ctx, "husk", o.x, o.y + 16, { s: 2 });
+      }
       if (kind === "guard") {
         const e = cell(3, 2);
         for (const [x, y] of [[3, 1], [2, 2], [4, 2]]) {

@@ -8,7 +8,7 @@
      smart   deep search + positional judgement   ~ a practiced player   target 85-95%
      greedy  deep search, only counts kills/damage ~ a comfortable player target 50-65%
      naive   shallow search, kills/damage only     ~ a first-time player  target 10-20% */
-global.window = { EL: {} };
+global.window = global.window || { EL: {} };
 require("../js/data.js");
 require("../js/logic.js");
 const EL = window.EL, L = EL.Logic, D = EL.Data;
@@ -40,9 +40,12 @@ function score(res, B, run, prof) {
     near = Math.min(near, Math.max(Math.abs(e.x - end.x), Math.abs(e.y - end.y)) + 1);
   }
   const room = L.reachable(B, L.blockedSet(B, res.T.route, res.T.cold), end, 3).size;
-  const hpLeft = T.hp - res.teleEnd;
+  const hpLeft = T.hp - res.teleEnd - L.cdThreat(run, res.st.enemies);
+  // drummers and heralds about to act make the next turn worse
+  let urgent = 0;
+  for (const e of res.st.enemies) if (e.alive && !e.tangled && e.cdMax && e.cd <= 1 && D.ENEMIES[e.type].act !== "snipe") urgent++;
   if (hpLeft - pressure <= 0) return -5e5;
-  return T.kills * 30 + dmg * 3 - (run.hp - hpLeft) * 4 - pressure * 6 + T.moves * 0.5 - near * 3 + room * 0.4 + T.tangles * 4;
+  return T.kills * 30 + dmg * 3 - (run.hp - hpLeft) * 4 - pressure * 6 + T.moves * 0.5 - near * 3 + room * 0.4 + T.tangles * 4 - urgent * 12;
 }
 function bestRoute(B, run, beam, prof) {
   prof = prof || PROF;
@@ -162,7 +165,10 @@ const pos = args.filter((x) => !x.startsWith("--"));
 const N = +pos[0] || 20;
 const heroes = pos[1] ? [pos[1]] : Object.keys(D.HEROES);
 
-if (process.env.DETAIL) {
+if (require.main !== module) {
+  // used as a library (tools/findmaps.js)
+  module.exports = { PROFILES, bestRoute, score, setProfile: (p) => (PROF = p) };
+} else if (process.env.DETAIL) {
   for (let i = 0; i < 6; i++) {
     const r = playRun(process.env.DETAIL, 1000 + i * 7919);
     console.log(r.win ? "WIN " : "LOSE", r.log.died || "", r.log.types.join(">"), "| turns", r.log.turns.map((t) => t[1]).join(","), "| hp", r.log.hp.join(","), "| comps", r.run.companions.join(","), "| relics", r.run.relics.join(","));

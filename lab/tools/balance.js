@@ -41,8 +41,11 @@ function score(res, B, run, prof) {
   }
   const room = L.reachable(B, L.blockedSet(B, res.T.route, res.T.cold), end, 3).size;
   const hpLeft = T.hp - res.teleEnd - L.cdThreat(run, res.st.enemies);
+  // drummers and heralds about to act make the next turn worse
+  let urgent = 0;
+  for (const e of res.st.enemies) if (e.alive && !e.tangled && e.cdMax && e.cd <= 1 && D.ENEMIES[e.type].act !== "snipe") urgent++;
   if (hpLeft - pressure <= 0) return -5e5;
-  return T.kills * 30 + dmg * 3 - (run.hp - hpLeft) * 4 - pressure * 6 + T.moves * 0.5 - near * 3 + room * 0.4 + T.tangles * 4;
+  return T.kills * 30 + dmg * 3 - (run.hp - hpLeft) * 4 - pressure * 6 + T.moves * 0.5 - near * 3 + room * 0.4 + T.tangles * 4 - urgent * 12;
 }
 function bestRoute(B, run, beam, prof) {
   prof = prof || PROF;

@@ -33,6 +33,7 @@
       if (this.busy) return;
       if (this.paused) return this.pauseHandle(evt);
       if (this.v.help.visible) return this.helpHandle(evt);
+      if (t === "route.input" && d.phase === "hover") { this.hoverInfo(d); return; }
       if (t === "ui.click") {
         if (d.id === "pause") { if (["Map", "Battle.Idle", "Battle.Planned"].includes(this.state)) this.openPause(); return; }
         if (d.id === "relic") { this.toastRelic(d.relic); return; }
@@ -60,7 +61,7 @@
     showOnly(names) {
       const v = this.v;
       if (names.length) this.hideToast();
-      for (const k of ["title", "charSelect", "reward", "choice", "pause", "help", "result"]) v[k].visible = names.includes(k);
+      for (const k of ["title", "charSelect", "reward", "choice", "pause", "help", "result", "lab"]) if (v[k]) v[k].visible = names.includes(k);
     }
     setHud(mode) {
       const v = this.v;
@@ -85,12 +86,21 @@
       t.alpha = 0; t.y = 400;
       EL.tween(t, { alpha: 1, y: 386 }, 160, { clock: "ui" });
       clearTimeout(this.toastTimer);
-      this.toastTimer = setTimeout(() => EL.tween(t, { alpha: 0 }, 250, { clock: "ui" }), ms || 2400);
+      this.toastTimer = setTimeout(() => EL.tween(t, { alpha: 0 }, 250, { clock: "ui" }), ms || 2000);
+    }
+    /* back to the lab picker, remembering how this board went */
+    labDone(result) {
+      let rec = {};
+      try { rec = JSON.parse(localStorage.getItem("emberline.lab2") || "{}"); } catch (_) {}
+      if (rec[this.labCur] !== "win") rec[this.labCur] = result;
+      try { localStorage.setItem("emberline.lab2", JSON.stringify(rec)); } catch (_) {}
+      this.busy = false;
+      this.wipe(async () => this.go("LabMenu"));
     }
     toastRelic(id) { const r = D.RELICS[id]; S.play("hover"); this.toast(r.name, r.desc, r.icon); }
     toastComp(id) {
       const c = D.COMPANIONS[id]; S.play("hover");
-      this.toast(`${c.name}「${c.skill}」`, `条件：${c.condLong}\n効果：${c.skillText}`, null, 3200);
+      this.toast(`${c.name}「${c.skill}」`, `条件：${c.condLong}\n効果：${c.skillText}`, null, 2600);
     }
     refreshRunHud() {
       const v = this.v, run = this.run;
@@ -136,7 +146,7 @@
         case "pause.quit":
           if (!this.quitArmed) { this.quitArmed = true; p.quit.label = "本当に？（もう一度）"; break; }
           this.closePause();
-          this.wipe(async () => { this.go("Title"); });
+          this.wipe(async () => { this.go(this.labCur ? "LabMenu" : "Title"); });
           break;
       }
     }
@@ -214,6 +224,8 @@
       bd.teles = [];
       for (const e of enemies) if (e.alive) for (const t of L.teleTiles(B, e)) bd.teles.push({ x: t.x, y: t.y, dmg: e.tele.dmg, uid: e.uid });
       bd.seals = enemies.filter((e) => e.alive && e.type === "totem").map((t) => ({ x: t.x, y: t.y, r: D.BAL.sealRange }));
+      bd.arrows = [];
+      for (const e of enemies) if (e.alive) for (const t of L.arrowTiles(B, enemies, e)) bd.arrows.push({ x: t.x, y: t.y, dir: L.OPP[e.weak] });
       bd.heroEnd = heroEnd || B.hero;
     }
     /* enemies sharing a tile (a tangle) fan out a little so each stays readable */
@@ -279,6 +291,7 @@
         ev.grow = e.grow || 0;
         ev.flip = e.weak === "L";
         ev.tangled = !!e.tangled;
+        ev.cd = e.cd || 0; ev.cdPrev = null;
         ev.tx = e.x; ev.ty = e.y;
       }
       this.layoutStacks();
@@ -291,7 +304,7 @@
     clearTargets() {
       for (const k in this.enemyViews) {
         const ev = this.enemyViews[k];
-        ev.target = false; ev.kill = false; ev.dmg = null; ev.guardDmg = null; ev.blocked = false; ev.dmgWeak = false; ev.pushOnly = false; ev.willGrow = false;
+        ev.target = false; ev.kill = false; ev.dmg = null; ev.guardDmg = null; ev.blocked = false; ev.dmgWeak = false; ev.pushOnly = false; ev.willGrow = false; ev.cdPrev = null;
       }
     }
     resetTurnHud() {
@@ -377,6 +390,7 @@
         if (dmg > 0 || !p.alive) { ev.target = true; ev.dmg = dmg; ev.kill = !p.alive; ev.refund = !p.alive ? refundOf[e.uid] || 0 : 0; }
         if (!p.alive) kills++;
         ev.willGrow = p.alive && !res.T.touched.has(e.uid) && this.route.length > 1;
+        if (p.alive && e.cdMax && p.cd !== e.cd) ev.cdPrev = p.cd;
       }
       rt.skillMarks = []; rt.areas = []; rt.pushes = []; rt.guardHits = [];
       let guardDmg = 0;
@@ -444,7 +458,8 @@
       else if (res.outcome === "victory") this.hint("このルートで全滅できる！");
       else if (res.teleEnd > 0) this.hint(`終点に攻撃予告！ −${res.teleEnd}`);
       else if (res.T.tangles > 0 && !kills) this.hint("もつれた！ 斬れば弱点ダメージ（斬るとほどける）");
-      else if (guardDmg > 0) this.hint(`反撃 −${guardDmg} — 弱点か斜めから斬れば反撃されない`);
+      else if (guardDmg > 0) this.hint(`被弾 −${guardDmg}（反撃・迎撃・爆発）`);
+      else if (L.cdThreat(run, res.st.enemies) > 0) this.hint(`狙撃手が撃ってくる！ −${L.cdThreat(run, res.st.enemies)} — 斬れば1ターン遅れる`);
       else if (skills) this.hint("仲間の能力が発動する！");
       else if (kills) this.hint(kills === 1 ? `撃破で移動+${L.stats(run).refund} — まだ伸ばせる` : "2体目以降の撃破は移動+1 — 目標を見極めて");
       else if (this.route.length > 1) this.hint("指を離して、出撃ボタンで実行");
@@ -485,16 +500,67 @@
       if (added) { S.play("step", this.route.length - 1); this.updatePreview(); }
       if (!sameTile(this.route[this.route.length - 1], tile)) { S.play("invalid"); this.hint("移動力が足りない — 撃破で回復する"); }
     }
-    enemyInfo(e) {
+    enemyInfo(e, ms) {
       const B = this.B, info = D.ENEMIES[e.type];
-      const wk = { U: "上", D: "下", L: "左", R: "右" }[e.weak];
+      const wk = L.weakSides(e).map((w) => ({ U: "上", D: "下", L: "左", R: "右" })[w]).join("・");
       const sealed = L.sealedBy(B.enemies, e);
       const tele = e.tele && !e.tangled ? `・予告${e.tele.dmg}` : "";
-      this.toast(`${info.name}　HP${e.hp}/${e.maxHp}`, `反撃${e.atk}${tele}・圧${L.enemyPressure(this.run, B, e)}・弱点：${sealed ? "封印中" : wk + "側"}${e.tangled ? "・もつれ中" : ""}\n${info.desc}`);
+      const cd = e.cdMax ? `・カウント${e.cd}` : "";
+      this.toast(`${info.name}　HP${e.hp}/${e.maxHp}`, `反撃${e.atk}${tele}${cd}・圧${L.enemyPressure(this.run, B, e)}・弱点：${sealed ? "封印中" : wk + "側"}${e.tangled ? "・もつれ中" : ""}\n${info.desc}`, null, ms || 3200);
+    }
+    /* right click: drop what is in hand — the details, the route being drawn, or the planned route */
+    cancelInput() {
+      if (this.busy || this.paused || this.v.help.visible) return;
+      if (this.inspectUid || this.inspectOpen) { this.pressShown = false; this.inspectStop(); return; }
+      if (this.state === "Battle.Dragging" || this.state === "Battle.Planned") {
+        S.play("cancel");
+        this.setDragUI(false);
+        this.go("Battle.Idle");
+      }
+    }
+    /* a press on the board: held on an enemy for a moment, it explains the enemy (without moving) */
+    armPress(d) {
+      this.tapTile = d.tile; this.tapT = EL.Time.ui; this.pressShown = false;
+      const e = d.tile && L.enemyAt(this.B.enemies, d.tile.x, d.tile.y);
+      if (e) this.inspectStart(e, d, 420, () => { if (this.tapTile && sameTile(this.tapTile, d.tile)) this.pressShown = true; else return false; });
+      else this.inspectStop();
+    }
+    /* the inspect ring: fills beside the pointer, then shows the enemy's details (kept until inspectStop) */
+    inspectStart(e, d, ms, ok) {
+      const ring = this.v.inspect;
+      this.inspectStop(true);
+      this.inspectUid = e.uid;
+      const tok = (this.inspectTok = (this.inspectTok || 0) + 1);
+      ring.on = true; ring.p = 0; ring.px = d.sx; ring.py = d.sy;
+      EL.tween(ring, { p: 1 }, ms, { clock: "ui" }).then(() => {
+        if (tok !== this.inspectTok || this.inspectUid !== e.uid || !ring.on || ring.p < 1) return;
+        if (ok && ok() === false) { this.inspectStop(); return; }
+        this.inspectOpen = true;
+        this.enemyInfo(e, 600000);
+        setTimeout(() => { if (this.inspectUid === e.uid) ring.on = false; }, 250);
+      });
+    }
+    inspectStop(keepToast) {
+      const ring = this.v.inspect;
+      EL.tweens.kill(ring); ring.on = false; ring.p = 0;
+      this.inspectUid = null;
+      if (this.inspectOpen && !keepToast) { this.inspectOpen = false; clearTimeout(this.toastTimer); EL.tween(this.v.toast, { alpha: 0 }, 150, { clock: "ui" }); }
+      this.inspectOpen = false;
+    }
+    /* desktop: resting the cursor on an enemy fills the ring, then explains it; leaving hides it */
+    hoverInfo(d) {
+      if (!["Battle.Idle", "Battle.Planned"].includes(this.state) || !this.B || !d.tile) { if (this.inspectUid) this.inspectStop(); this.hoverKey = null; return; }
+      const e = L.enemyAt(this.B.enemies, d.tile.x, d.tile.y);
+      const key = e ? e.uid : null;
+      if (key === this.hoverKey) { if (e && this.v.inspect.on) { this.v.inspect.px = d.sx; this.v.inspect.py = d.sy; } return; }
+      this.hoverKey = key;
+      if (e) this.inspectStart(e, d, 650); else this.inspectStop();
     }
     /* a tap (short) plans a route; a long press on an enemy explains it */
     tapPlan(d) {
       const B = this.B;
+      if (this.pressShown) { this.pressShown = false; const k = this.inspectUid; setTimeout(() => { if (this.inspectUid === k) this.inspectStop(); }, 1200); return; }
+      this.inspectStop();
       if (!this.tapTile || !d.tile || !sameTile(this.tapTile, d.tile)) return;
       const e = L.enemyAt(B.enemies, d.tile.x, d.tile.y);
       if (EL.Time.ui - this.tapT > 420) { if (e) this.enemyInfo(e); return; }
@@ -506,6 +572,7 @@
     enemyTile(uid) { const e = this.B.enemies.find((x) => x.uid === uid); return e ? { x: e.x, y: e.y } : { x: 0, y: 0 }; }
     setDragUI(on) {
       const v = this.v;
+      if (on && (this.inspectUid || this.inspectOpen)) this.inspectStop();
       EL.tween(v.board, { dim: on ? 1 : 0, entryEmph: on ? 1 : 0, guardEmph: on ? 1 : 0 }, 180, { clock: "ui" });
       EL.tween(v.footprints, { alpha: on ? 0.55 : 1 }, 180, { clock: "ui" }); // old embers step back while planning
       for (const k in this.enemyViews) EL.tween(this.enemyViews[k], { emph: on ? 1 : 0 }, 180, { clock: "ui" });
@@ -631,7 +698,7 @@
       h.red = 1; EL.tween(h, { red: 0 }, 260);
       h.ox = -6; EL.tween(h, { ox: 0 }, 220, { ease: U.ease.outElastic });
       v.floats.spawn("-" + ev.dmg, h.x, h.y - 50, { s: 3, color: "#ff4d5e", life: 800 });
-      v.floats.spawn("反撃", h.x, h.y - 76, { kind: "jp", color: "#ffb0c8", life: 700, vy: -30 });
+      v.floats.spawn({ arrow: "迎撃", blast: "爆発" }[ev.kind] || "反撃", h.x, h.y - 76, { kind: "jp", color: "#ffb0c8", life: 700, vy: -30 });
       v.fx.burst(h.x, h.y - 16, 14, { speed: [60, 200], life: [200, 420], palette: ["#ff4d5e", "#ff8f9b", "#8f2231"], size: 2, glow: true });
       v.postfx.flashLight(h.x, h.y - 16, 120, "255,70,90", 0.9, 300);
       v.playerHUD.hp = ev.hp; v.playerHUD.shake = 3; v.playerHUD.flash = 0.6;
@@ -642,6 +709,22 @@
       this.cam.shake(5, 200);
       await EL.wait(150);
       this.refreshObjectives();
+    }
+    /* a hit that left a countdown enemy standing pushed its count back */
+    async ev_delay(ev) {
+      const w = this.enemyViews[ev.uid];
+      if (!w) return;
+      const r = w.rect();
+      w.cd = ev.cd; w.cdPop = 1; EL.tween(w, { cdPop: 0 }, 300, { clock: "ui" });
+      this.v.floats.spawn("遅延+1", r.x + 12, r.y - 10, { kind: "jp", color: C.move, life: 700, vy: -30 });
+    }
+    async ev_explode(ev) {
+      const v = this.v, c = tc(ev.x, ev.y);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) v.fx.tileFlash(ev.x + dx, ev.y + dy, "rgba(255,120,40,0.6)", 380);
+      v.fx.burst(c.x, c.y, 50, { speed: [60, 260], life: [300, 700], palette: [C.ember, C.emberL, "#ff4d5e", C.cream], sizes: [2, 4], glow: true });
+      v.postfx.flashLight(c.x, c.y, 220, "255,140,60", 1, 500);
+      S.play("fire"); this.cam.shake(8, 260); EL.hitstop(90);
+      await EL.wait(160);
     }
     async ev_guardBlocked(ev) {
       const v = this.v, h = v.hero;
@@ -971,6 +1054,7 @@
             if (ev.total > 0) v.floats.spawn("-" + ev.total, h.x, h.y - 56, { s: 4, color: "#ff4d5e", grad: "#ffb0b8", life: 1100 });
             if (ev.reduced) v.floats.spawn("余熱 -" + ev.reduced, h.x, h.y - 88, { kind: "jp", color: C.emberL, life: 1100, vy: -30 });
             if (ev.src === "strike") v.floats.spawn("直撃", h.x, h.y - 88, { kind: "jp", color: "#ffb020", life: 1000, vy: -30 });
+            if (ev.src === "snipe") v.floats.spawn("狙撃", h.x, h.y - 88, { kind: "jp", color: "#ff4d5e", life: 1000, vy: -30 });
             v.fx.burst(h.x, h.y - 16, 28, { speed: [60, 220], life: [200, 550], palette: ["#b08cff", "#ff4d5e", "#5c34b0"], size: 2, glow: true });
             v.postfx.flashLight(h.x, h.y - 16, 170, "180,110,255", 1, 500);
             v.playerHUD.hp = ev.hp; v.playerHUD.shake = 4; v.playerHUD.flash = 0.7;
@@ -983,6 +1067,23 @@
             break;
           }
           case "revive": await this.ev_revive(ev); break;
+          case "cdTick": { const w = this.enemyViews[ev.uid]; if (w) { w.cd = ev.cd; w.cdPop = 1; EL.tween(w, { cdPop: 0 }, 260, { clock: "ui" }); } await EL.wait(90); break; }
+          case "cdAct": {
+            const w = this.enemyViews[ev.uid];
+            if (!w) break;
+            const r = w.rect(), cx = r.x + r.s / 2, cy = r.y + r.s / 2;
+            w.cd = ev.cd; w.flash = 1; EL.tween(w, { flash: 0 }, 300);
+            w.oy = -10; EL.tween(w, { oy: 0 }, 260, { ease: U.ease.outBack });
+            const lab = { snipe: "狙撃", drum: "鼓舞", rally: "号令" }[ev.act] || "";
+            v.floats.spawn(lab, cx, r.y - 20, { kind: "jp", size: 24, color: C.emberL, life: 900, vy: -20 });
+            if (ev.act === "snipe") { const h = v.hero; v.fx.beam(cx, cy, h.x, h.y - 16, "#ff4d5e", 320); S.play("beam"); }
+            else if (ev.act === "drum") { v.fx.ring(cx, cy, 90, "#ff8a2a", 500, 4); S.play("bolt"); }
+            else { v.fx.ring(cx, cy, 120, C.emberL, 500, 4); S.play("roar"); }
+            this.cam.shake(4, 200);
+            await EL.wait(360);
+            break;
+          }
+          case "drum": for (const c of ev.cds) { const w = this.enemyViews[c.uid]; if (w) { w.cd = c.cd; w.cdPop = 1; EL.tween(w, { cdPop: 0 }, 300, { clock: "ui" }); } } await EL.wait(200); break;
           case "heroDown": return "dead";
           case "rotate": {
             const evw = this.enemyViews[ev.uid];
@@ -1085,6 +1186,35 @@
 
   /* ================= states ================= */
   const STATES = {
+    /* the lab: pick a saved board and play it on its own */
+    LabMenu: {
+      enter() {
+        const v = this.v;
+        this.run = null; this.B = null; this.labCur = null;
+        v.bg.theme = "map"; v.bg.pulse = 0;
+        this.setHud("none");
+        v.battleWorld.visible = false; v.mapView.visible = false; v.hudLayer.visible = false;
+        try { v.lab.cleared = JSON.parse(localStorage.getItem("emberline.lab2") || "{}"); } catch (_) { v.lab.cleared = {}; }
+        this.showOnly(["lab"]);
+        S.bgm("map");
+      },
+      on(evt) {
+        if (evt.type !== "ui.click") return;
+        const id = evt.data.id || "";
+        if (id === "lab.title") { S.play("confirm"); this.wipe(async () => this.go("Title")); return; }
+        const m = /^lab\.(s|b)(\d+)$/.exec(id);
+        if (!m) return;
+        const list = m[1] === "s" ? EL.Scenarios : EL.Blind, sc = list && list[+m[2]];
+        if (!sc) return;
+        S.play("confirm");
+        const run = (this.run = L.createRun(sc.hero, sc.seed));
+        run.companions = sc.companions.slice(); run.relics = sc.relics.slice(); run.hp = sc.hp;
+        this.v.mapView.setMap(run.map);
+        this.labCur = m[1] + m[2];
+        this.showOnly([]);
+        this.go("BattleIntro", { type: sc.kind, row: sc.row, spec: sc.spec });
+      },
+    },
     Title: {
       enter() {
         const v = this.v;
@@ -1277,7 +1407,7 @@
           if (spot) { this.moveStart(spot); this.go("Battle.Dragging"); return; }
           const grabbed = (d.tile && sameTile(d.tile, B.hero)) || Math.hypot(d.px - hc.x, d.py - hc.y) < V.GEO.T * 0.85;
           if (grabbed) { this.go("Battle.Dragging"); return; }
-          this.tapTile = d.tile; this.tapT = EL.Time.ui;
+          this.armPress(d);
         } else if (d.phase === "end") {
           this.tapPlan(d);
           this.tapTile = null;
@@ -1340,7 +1470,7 @@
         if (near(tip)) this.go("Battle.Dragging", this.route);
         else if (spot) { this.setDragUI(false); this.moveStart(spot); this.go("Battle.Dragging"); }
         else if (near(B.hero)) this.go("Battle.Dragging");
-        else { this.tapTile = d.tile; this.tapT = EL.Time.ui; }
+        else { this.armPress(d); }
       },
     },
 
@@ -1391,6 +1521,7 @@
         for (let i = 0; i < 3; i++) setTimeout(() => v.hudFx.burst(U.rand(60, 300), U.rand(200, 360), 24, { speed: [40, 200], life: [500, 1100], palette: [C.ember, C.emberL, C.cream, C.gold], sizes: [2, 4], ay: 120, glow: true }), i * 180);
         run.stats.battles++;
         await this.banner(B.isBoss ? "CONQUERED" : "VICTORY", B.isBoss ? "灰冠の王を討ち果たした" : `撃破！ ${B.turn}ターンで制圧`, C.gold, 900);
+        if (this.labCur) { this.labDone("win"); return; }
         if (!B.isBoss) {
           const got = L.claimObjectives(run, B);
           this.refreshObjectives();
@@ -1423,6 +1554,7 @@
         await this.banner("DEFEAT", "燈が消えた…", "#ff8f9b", 1200);
         v.vignette.dark = 0;
         this.busy = false;
+        if (this.labCur) { this.labDone("lose"); return; }
         this.wipe(async () => this.go("GameOver"), "#000");
       },
     },

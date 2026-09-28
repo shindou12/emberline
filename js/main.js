@@ -67,6 +67,7 @@
     v.cutin = overlayLayer.add(new V.SkillCutInView());
     v.vignette = overlayLayer.add(new V.VignetteView());
     v.toast = overlayLayer.add(new V.ToastView());
+    v.inspect = overlayLayer.add(new V.InspectRingView());
     v.toast.alpha = 0;
 
     // Modals
@@ -77,6 +78,7 @@
     v.pause = modalLayer.add(new V.PauseView());
     v.help = modalLayer.add(new V.HelpView());
     v.result = modalLayer.add(new V.ResultView());
+    v.lab = modalLayer.add(new V.LabView());
     for (const k of ["charSelect", "reward", "choice", "pause", "help", "result"]) v[k].visible = false;
 
     // Transitions
@@ -122,6 +124,8 @@
 
     const input = new EL.InputManager(canvas, v.root);
     input.onAny = () => EL.Audio.init();
+    input.onCancel = () => med.cancelInput();
+    input.onHoverOff = () => { if (med.hoverKey != null || med.inspectUid) { med.hoverKey = null; if (!med.pressShown) med.inspectStop(); } };
     document.addEventListener("touchend", () => EL.Audio.init(), { passive: true });
     window.addEventListener("keydown", () => EL.Audio.init(), { once: true });
 
@@ -160,7 +164,8 @@
       v.root.render(ctx);
       requestAnimationFrame(frame);
     }
-    med.go("Title");
+    // the lab site (?lab, or a page that sets EL_LAB) opens on the board picker
+    med.go(/[?&]lab\b/.test(location.search) || window.EL_LAB ? "LabMenu" : "Title");
     requestAnimationFrame(frame);
     const loading = document.getElementById("loading");
     if (loading) loading.remove();
