@@ -407,7 +407,7 @@
           if (ev) ev.guardDmg = (ev.guardDmg || 0) + g.dmg;
           rt.guardHits.push({ x: st.tile.x, y: st.tile.y, dmg: g.dmg });
         }
-        for (const pu of st.pushes) rt.pushes.push(pu);
+        for (const pu of st.pushes) { const w = this.enemyViews[pu.uid]; rt.pushes.push(w ? Object.assign({ sprite: w.sprite }, pu) : pu); }
         for (const sk of st.skills) {
           skills++;
           rt.skillMarks.push({ x: st.tile.x, y: st.tile.y, comp: sk.comp, color: D.COMPANIONS[sk.comp].color, k: skills });

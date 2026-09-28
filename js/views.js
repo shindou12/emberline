@@ -581,6 +581,7 @@
         ctx.fillStyle = C.ink; A.pline(ctx, a.x, a.y, b.x, b.y, 7);
         ctx.fillStyle = f ? "#ffb020" : "#ffd35a"; A.pline(ctx, a.x, a.y, b.x, b.y, 3);
       }
+      if (p.sprite && pts.length > 1) this.drawPushGhost(ctx, p, pts);
       const end = pts[pts.length - 1], c = tc(end.x, end.y);
       const d = p.dir || [0, 0];
       if (pts.length > 1) {
@@ -609,6 +610,24 @@
         A.text(ctx, "-" + p.bump, bx + 11, by + 2, { s: 1, align: "center", color: "#ffe9a8" });
       }
     }
+  };
+  /* the pushed enemy as a see-through ghost that slides to where it will land (looping),
+     leaving two fading afterimages, then rests there a moment */
+  RoutePreviewView.prototype.drawPushGhost = function (ctx, p, pts) {
+    const n = pts.length - 1, cyc = 700 + n * 220, u = (this.t % cyc) / (cyc - 350);
+    const at = (q) => {
+      q = Math.max(0, Math.min(1, q));
+      const e = 1 - Math.pow(1 - q, 3), s = e * n, k = Math.min(n - 1, Math.floor(s)), fr = s - k;
+      const a = tc(pts[k].x, pts[k].y), b = tc(pts[k + 1].x, pts[k + 1].y);
+      return { x: a.x + (b.x - a.x) * fr, y: a.y + (b.y - a.y) * fr };
+    };
+    const ga = ctx.globalAlpha, flip = p.dir && p.dir[0] < 0;
+    // afterimages behind the ghost while it moves
+    if (u < 1) for (const [lag, al] of [[0.12, 0.2], [0.24, 0.1]]) { const q = at(u - lag); ctx.globalAlpha = ga * al; A.spr(ctx, p.sprite, q.x, q.y + T / 2 - 6, { s: 2, flip }); }
+    const g = at(u);
+    ctx.globalAlpha = ga * (u < 1 ? 0.62 : 0.62 - 0.2 * Math.sin(this.t / 120) ** 2);
+    A.spr(ctx, p.sprite, g.x, g.y + T / 2 - 6, { s: 2, flip, white: u >= 1 ? 0.25 : 0 });
+    ctx.globalAlpha = ga;
   };
   V.RoutePreviewView = RoutePreviewView;
 
