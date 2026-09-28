@@ -273,6 +273,7 @@ window.EL = window.EL || {};
       canvas.addEventListener("pointerup", (e) => this.up(e), opt);
       canvas.addEventListener("pointercancel", (e) => this.cancel(e), opt);
       canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+      canvas.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse" && this.onHoverOff) this.onHoverOff(); });
       this.onAny = null;
     }
     pos(e) {
@@ -301,6 +302,7 @@ window.EL = window.EL || {};
       if (this.active === null && e.pointerType === "mouse") {
         const p = this.pos(e), h = this.root.hit(p.x, p.y);
         if (h && h.node.inputKind === "route") h.node.routeInput("hover", p);
+        else if (this.onHoverOff) this.onHoverOff();
         return;
       }
       if (e.pointerId !== this.active) return;

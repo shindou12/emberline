@@ -86,7 +86,7 @@
       t.alpha = 0; t.y = 400;
       EL.tween(t, { alpha: 1, y: 386 }, 160, { clock: "ui" });
       clearTimeout(this.toastTimer);
-      this.toastTimer = setTimeout(() => EL.tween(t, { alpha: 0 }, 250, { clock: "ui" }), ms || 2400);
+      this.toastTimer = setTimeout(() => EL.tween(t, { alpha: 0 }, 250, { clock: "ui" }), ms || 1600);
     }
     /* back to the lab picker, remembering how this board went */
     labDone(result) {
@@ -100,7 +100,7 @@
     toastRelic(id) { const r = D.RELICS[id]; S.play("hover"); this.toast(r.name, r.desc, r.icon); }
     toastComp(id) {
       const c = D.COMPANIONS[id]; S.play("hover");
-      this.toast(`${c.name}「${c.skill}」`, `条件：${c.condLong}\n効果：${c.skillText}`, null, 3200);
+      this.toast(`${c.name}「${c.skill}」`, `条件：${c.condLong}\n効果：${c.skillText}`, null, 2200);
     }
     refreshRunHud() {
       const v = this.v, run = this.run;
@@ -511,24 +511,46 @@
     /* a press on the board: held on an enemy for a moment, it explains the enemy (without moving) */
     armPress(d) {
       this.tapTile = d.tile; this.tapT = EL.Time.ui; this.pressShown = false;
-      clearTimeout(this.pressTimer);
       const e = d.tile && L.enemyAt(this.B.enemies, d.tile.x, d.tile.y);
-      if (e) this.pressTimer = setTimeout(() => { if (this.tapTile && sameTile(this.tapTile, d.tile)) { this.pressShown = true; this.enemyInfo(e); } }, 380);
+      if (e) this.inspectStart(e, d, 420, () => { if (this.tapTile && sameTile(this.tapTile, d.tile)) this.pressShown = true; else return false; });
+      else this.inspectStop();
     }
-    /* desktop: hovering an enemy explains it */
+    /* the inspect ring: fills beside the pointer, then shows the enemy's details (kept until inspectStop) */
+    inspectStart(e, d, ms, ok) {
+      const ring = this.v.inspect;
+      this.inspectStop(true);
+      this.inspectUid = e.uid;
+      const tok = (this.inspectTok = (this.inspectTok || 0) + 1);
+      ring.on = true; ring.p = 0; ring.px = d.sx; ring.py = d.sy;
+      EL.tween(ring, { p: 1 }, ms, { clock: "ui" }).then(() => {
+        if (tok !== this.inspectTok || this.inspectUid !== e.uid || !ring.on || ring.p < 1) return;
+        if (ok && ok() === false) { this.inspectStop(); return; }
+        this.inspectOpen = true;
+        this.enemyInfo(e, 600000);
+        setTimeout(() => { if (this.inspectUid === e.uid) ring.on = false; }, 250);
+      });
+    }
+    inspectStop(keepToast) {
+      const ring = this.v.inspect;
+      EL.tweens.kill(ring); ring.on = false; ring.p = 0;
+      this.inspectUid = null;
+      if (this.inspectOpen && !keepToast) { this.inspectOpen = false; clearTimeout(this.toastTimer); EL.tween(this.v.toast, { alpha: 0 }, 150, { clock: "ui" }); }
+      this.inspectOpen = false;
+    }
+    /* desktop: resting the cursor on an enemy fills the ring, then explains it; leaving hides it */
     hoverInfo(d) {
-      if (!["Battle.Idle", "Battle.Planned"].includes(this.state) || !this.B || !d.tile) return;
+      if (!["Battle.Idle", "Battle.Planned"].includes(this.state) || !this.B || !d.tile) { if (this.inspectUid) this.inspectStop(); this.hoverKey = null; return; }
       const e = L.enemyAt(this.B.enemies, d.tile.x, d.tile.y);
       const key = e ? e.uid : null;
-      if (key === this.hoverKey) return;
+      if (key === this.hoverKey) { if (e && this.v.inspect.on) { this.v.inspect.px = d.sx; this.v.inspect.py = d.sy; } return; }
       this.hoverKey = key;
-      if (e) this.enemyInfo(e, 4000);
+      if (e) this.inspectStart(e, d, 650); else this.inspectStop();
     }
     /* a tap (short) plans a route; a long press on an enemy explains it */
     tapPlan(d) {
       const B = this.B;
-      clearTimeout(this.pressTimer);
-      if (this.pressShown) { this.pressShown = false; return; }
+      if (this.pressShown) { this.pressShown = false; const k = this.inspectUid; setTimeout(() => { if (this.inspectUid === k) this.inspectStop(); }, 1200); return; }
+      this.inspectStop();
       if (!this.tapTile || !d.tile || !sameTile(this.tapTile, d.tile)) return;
       const e = L.enemyAt(B.enemies, d.tile.x, d.tile.y);
       if (EL.Time.ui - this.tapT > 420) { if (e) this.enemyInfo(e); return; }
@@ -540,6 +562,7 @@
     enemyTile(uid) { const e = this.B.enemies.find((x) => x.uid === uid); return e ? { x: e.x, y: e.y } : { x: 0, y: 0 }; }
     setDragUI(on) {
       const v = this.v;
+      if (on && (this.inspectUid || this.inspectOpen)) this.inspectStop();
       EL.tween(v.board, { dim: on ? 1 : 0, entryEmph: on ? 1 : 0, guardEmph: on ? 1 : 0 }, 180, { clock: "ui" });
       EL.tween(v.footprints, { alpha: on ? 0.55 : 1 }, 180, { clock: "ui" }); // old embers step back while planning
       for (const k in this.enemyViews) EL.tween(this.enemyViews[k], { emph: on ? 1 : 0 }, 180, { clock: "ui" });

@@ -67,6 +67,7 @@
     v.cutin = overlayLayer.add(new V.SkillCutInView());
     v.vignette = overlayLayer.add(new V.VignetteView());
     v.toast = overlayLayer.add(new V.ToastView());
+    v.inspect = overlayLayer.add(new V.InspectRingView());
     v.toast.alpha = 0;
 
     // Modals
@@ -123,6 +124,7 @@
 
     const input = new EL.InputManager(canvas, v.root);
     input.onAny = () => EL.Audio.init();
+    input.onHoverOff = () => { if (med.hoverKey != null || med.inspectUid) { med.hoverKey = null; if (!med.pressShown) med.inspectStop(); } };
     document.addEventListener("touchend", () => EL.Audio.init(), { passive: true });
     window.addEventListener("keydown", () => EL.Audio.init(), { once: true });
 

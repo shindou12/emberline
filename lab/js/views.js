@@ -126,6 +126,7 @@
     }
     /* raw pointer → route input event (geometry only; legality decided elsewhere) */
     routeInput(phase, p) {
+      const sp = p; // screen position, for UI drawn over the board
       const l = this.globalToLocal(p.x, p.y);
       const lx = l.x, ly = l.y;
       p = { x: lx + this.x, y: ly + this.y };
@@ -133,7 +134,7 @@
       const inside = tx >= 0 && ty >= 0 && tx < GW && ty < GH;
       const cx = tx * T + T / 2, cy = ty * T + T / 2;
       const near = inside && Math.hypot(lx - cx, ly - cy) < T * 0.34;
-      this.emit("route.input", { phase, tile: inside ? { x: tx, y: ty } : null, near, px: p.x, py: p.y });
+      this.emit("route.input", { phase, tile: inside ? { x: tx, y: ty } : null, near, px: p.x, py: p.y, sx: sp.x, sy: sp.y });
     }
     tick(dt) { this.t += dt; }
     draw(ctx) {
@@ -1203,6 +1204,24 @@
     }
   }
   V.VignetteView = VignetteView;
+
+  /* a ring that fills beside the cursor (or finger) while it rests on an enemy; full = details */
+  class InspectRingView extends EL.Node {
+    constructor() { super("InspectRing"); this.p = 0; this.on = false; this.px = 0; this.py = 0; }
+    draw(ctx) {
+      if (!this.on || this.p <= 0) return;
+      const cx = this.px + 18, cy = this.py - 18, r = 11;
+      ctx.lineCap = "butt";
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = "#3a2f58"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = this.p >= 1 ? C.gold : C.cream; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, this.p)); ctx.stroke();
+      A.jp(ctx, "?", cx, cy - 8, { size: 12, align: "center", color: this.p >= 1 ? C.gold : C.dim, ow: 1 });
+    }
+  }
+  V.InspectRingView = InspectRingView;
 
   class ToastView extends EL.Node {
     constructor() { super("Notifications"); this.title = ""; this.body = ""; this.alpha = 0; this.icon = null; this.y = 386; }
