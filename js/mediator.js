@@ -1579,7 +1579,9 @@
         this.busy = false;
         if (B.isBoss) { this.wipe(async () => this.go("RunClear")); return; }
         const kind = B.kind === "elite" ? "elite" : "battle";
-        this.go("Reward", { kind, title: kind === "elite" ? "強敵の戦利品" : "戦利品", sub: kind === "elite" ? "稀少なレリックが眠っている" : "仲間かレリックをひとつ" });
+        const firstComp = !run.companions.length, slot = run.companions.length < D.BAL.maxCompanions;
+        const sub = kind === "elite" ? (slot ? "新たな仲間か、稀少なレリックを" : "稀少なレリックが眠っている") : firstComp ? "最初の仲間を選ぼう" : "レリックをひとつ";
+        this.go("Reward", { kind, title: kind === "elite" ? "強敵の戦利品" : "戦利品", sub });
       },
     },
 

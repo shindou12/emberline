@@ -125,7 +125,9 @@
     t1: [["husk", "archer", "sniper", "husk", "wisp"], ["husk", "bomber", "husk", "wisp", "bomber"], ["knight", "husk", "wisp", "drummer", "sniper"], ["husk", "husk", "wisp", "husk", "shield"], ["husk", "wisp", "wisp", "caller", "husk"], ["husk", "shield", "wisp", "husk", "husk"]],
     t2: [["archer", "sniper", "husk", "knight", "wisp"], ["drummer", "sniper", "husk", "archer", "husk"], ["herald", "knight", "husk", "shield", "wisp"], ["bomber", "bomber", "husk", "totem", "wisp"], ["archer", "archer", "sniper", "drummer", "husk"], ["shield", "shield", "wisp", "totem", "husk"], ["husk", "husk", "wisp", "wisp", "caller", "shield"], ["totem", "husk", "shield", "wisp", "husk", "husk"]],
     t3: [["knight", "archer", "sniper", "drummer", "bomber", "husk"], ["herald", "knight", "knight", "sniper", "wisp", "husk"], ["totem", "archer", "sniper", "bomber", "husk", "wisp"], ["totem", "shield", "shield", "wisp", "husk", "husk"], ["husk", "husk", "husk", "wisp", "wisp", "shield", "caller"]],
-    elite: [["brute", "archer", "sniper", "husk", "wisp"], ["brute", "herald", "knight", "bomber"], ["brute", "husk", "wisp", "husk", "shield"], ["brute", "shield", "totem", "wisp", "husk"], ["brute", "brute", "caller", "wisp"]],
+    // elites are themed exams (lanes / swarm / wards / powder / hammers), a notch above
+    // the hallway so the companion behind them is a risk you choose to take
+    elite: [["brute", "archer", "archer", "sniper", "husk", "wisp"], ["brute", "caller", "caller", "husk", "husk", "wisp"], ["brute", "totem", "shield", "shield", "wisp", "husk"], ["brute", "bomber", "bomber", "bomber", "husk", "wisp"], ["brute", "brute", "drummer", "wisp", "husk"]],
   };
   const inB = (B, x, y) => x >= 0 && y >= 0 && x < B.w && y < B.h;
   const idx = (B, x, y) => y * B.w + x;
@@ -1059,8 +1061,10 @@
     const compPool = shuffle(rng, Object.keys(D.COMPANIONS).filter((id) => !run.companions.includes(id)));
     const slots = BAL.maxCompanions - run.companions.length;
     let nComp = 0, nRelic = 3, rare = 0.2;
-    if (kind === "battle") { nComp = slots > 0 ? (run.companions.length === 0 ? 2 : 1) : 0; nRelic = 3 - nComp; }
-    if (kind === "elite") { nRelic = 3; rare = 0.65; }
+    // the big power sits behind risk: a plain battle only brings the first companion,
+    // later ones come from elites (or objectives / the recruit event)
+    if (kind === "battle") { nComp = run.companions.length === 0 ? 2 : 0; nRelic = 3 - nComp; }
+    if (kind === "elite") { nComp = slots > 0 ? 1 : 0; nRelic = 3 - nComp; rare = 0.65; }
     if (kind === "treasure") { nRelic = 3; rare = 0.35; }
     if (kind === "lost") { nComp = Math.min(2, slots); nRelic = 0; }
     for (let i = 0; i < nComp && i < compPool.length; i++) out.push({ kind: "comp", id: compPool[i] });
