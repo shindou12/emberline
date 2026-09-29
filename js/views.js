@@ -887,15 +887,14 @@
         A.jp(ctx, "残" + after, tx + 12, ty - 2, { size: 12, align: "center", color: C.cream, ow: 1 });
       }
     }
-    /* a kill: the bar is covered by a red 撃破 plate with a skull (drawn by KillPlateView) */
+    /* a kill: the bar is covered by a red skull plate (drawn by KillPlateView) */
     drawKillPlate(ctx) {
-      const pw = 46, ph = 16, bob = Math.floor(this.t / 260) % 2;
+      const pw = 22, ph = 16, bob = Math.floor(this.t / 260) % 2;
       const px = U.snap(this.plate.x - pw / 2), py = U.snap(this.plate.y - ph / 2) - bob;
       ctx.fillStyle = C.ink; ctx.fillRect(px - 2, py - 2, pw + 4, ph + 4);
       ctx.fillStyle = Math.floor(this.t / 160) % 2 ? "#ff4d5e" : "#d8303f"; ctx.fillRect(px, py, pw, ph);
       ctx.fillStyle = "#ffb0b8"; ctx.fillRect(px, py, pw, 2);
-      A.spr(ctx, "i_skull", px + 9, py + ph - 1, { s: 2, ax: 0.5, ay: 1 });
-      A.jp(ctx, "撃破", px + 30, py - 1, { size: 12, align: "center", color: "#fff6df", ow: 1 });
+      A.spr(ctx, "i_skull", px + pw / 2, py + ph - 1, { s: 2, ax: 0.5, ay: 1 });
     }
     drawTarget(ctx, r) {
       const k = (Math.sin(this.t / 90) + 1) / 2;
