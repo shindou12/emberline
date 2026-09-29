@@ -237,36 +237,43 @@
       planTelegraphs(B);
       return B;
     }
-    // rocks
-    const nRocks = ri(rng, 2, 4);
-    for (let tries = 0, placed = 0; placed < nRocks && tries < 200; tries++) {
-      const x = ri(rng, 0, B.w - 1), y = ri(rng, 0, 6);
-      if (Math.abs(x - 3) <= 1 && y >= 6) continue;
-      if (B.tiles[idx(B, x, y)]) continue;
-      B.tiles[idx(B, x, y)] = 1;
-      if (!connected(B, 3, 7)) { B.tiles[idx(B, x, y)] = 0; continue; }
-      placed++;
+    // a board below the floor (nothing to kill on the first route, weak sides walled off) is rerolled
+    const cursed = !!run.flags.cursed;
+    run.flags.cursed = false;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      B.tiles.fill(0); B.enemies = []; B.uidSeq = 0;
+      // rocks
+      const nRocks = ri(rng, 2, 4);
+      for (let tries = 0, placed = 0; placed < nRocks && tries < 200; tries++) {
+        const x = ri(rng, 0, B.w - 1), y = ri(rng, 0, 6);
+        if (Math.abs(x - 3) <= 1 && y >= 6) continue;
+        if (B.tiles[idx(B, x, y)]) continue;
+        B.tiles[idx(B, x, y)] = 1;
+        if (!connected(B, 3, 7)) { B.tiles[idx(B, x, y)] = 0; continue; }
+        placed++;
+      }
+      // enemies
+      let list;
+      const row = node.row;
+      if (node.type === "elite") { list = rpick(rng, ENC.elite).slice(); if (row >= 5) list.push("husk"); }
+      else if (row === 0) list = rpick(rng, ENC.t0).slice();
+      else if (row <= 2) list = rpick(rng, ENC.t1).slice();
+      else if (row <= 4) list = rpick(rng, ENC.t2).slice();
+      else list = rpick(rng, ENC.t3).slice();
+      if (cursed) list.push("brute");
+      const free = [];
+      for (let y = 0; y <= 5; y++) for (let x = 0; x < B.w; x++) if (!B.tiles[idx(B, x, y)]) free.push([x, y]);
+      const order = shuffle(rng, free);
+      const spaced = (x, y) => !B.enemies.some((e) => Math.abs(e.x - x) <= 1 && Math.abs(e.y - y) <= 1);
+      for (const type of list) {
+        let spot = order.find(([x, y]) => !enemyAt(B.enemies, x, y) && spaced(x, y));
+        if (!spot) spot = order.find(([x, y]) => !enemyAt(B.enemies, x, y));
+        if (!spot) break;
+        B.enemies.push(makeEnemy(B, type, spot[0], spot[1], rng));
+      }
+      placeStart(B);
+      if (!floorFails(B, run).length) break;
     }
-    // enemies
-    let list;
-    const row = node.row;
-    if (node.type === "elite") { list = rpick(rng, ENC.elite).slice(); if (row >= 5) list.push("husk"); }
-    else if (row === 0) list = rpick(rng, ENC.t0).slice();
-    else if (row <= 2) list = rpick(rng, ENC.t1).slice();
-    else if (row <= 4) list = rpick(rng, ENC.t2).slice();
-    else list = rpick(rng, ENC.t3).slice();
-    if (run.flags.cursed) { list.push("brute"); run.flags.cursed = false; }
-    const free = [];
-    for (let y = 0; y <= 5; y++) for (let x = 0; x < B.w; x++) if (!B.tiles[idx(B, x, y)]) free.push([x, y]);
-    const order = shuffle(rng, free);
-    const spaced = (x, y) => !B.enemies.some((e) => Math.abs(e.x - x) <= 1 && Math.abs(e.y - y) <= 1);
-    for (const type of list) {
-      let spot = order.find(([x, y]) => !enemyAt(B.enemies, x, y) && spaced(x, y));
-      if (!spot) spot = order.find(([x, y]) => !enemyAt(B.enemies, x, y));
-      if (!spot) break;
-      B.enemies.push(makeEnemy(B, type, spot[0], spot[1], rng));
-    }
-    placeStart(B);
     B.objectives = genObjectives(run, B);
     planTelegraphs(B);
     return B;
@@ -1142,12 +1149,92 @@
     return total;
   }
 
+  /* ---------- difficulty ----------
+     What a board asks of the player, measured without playing it. "hits" is the
+     player-relative core: blows needed to clear, counting a weak blow when the weak
+     side can be reached (not walled, not crowded, not sealed) and a plain blow when not. */
+  const SPECIAL = { archer: "intercept", knight: "armor", sniper: "countdown", drummer: "countdown", herald: "countdown", bomber: "bomb", totem: "seal", caller: "summon", brute: "heavy", shield: "heavy" };
+  function boardMetrics(B, run) {
+    const S = stats(run), es = B.enemies.filter((e) => e.alive);
+    const free = (x, y) => !isRock(B, x, y) && !enemyAt(es, x, y);
+    const sideFree = (e, w) => {
+      const [dx, dy] = CARD[w];
+      for (let k = 0; k < e.size; k++) {
+        const tx = dx === 0 ? e.x + k : dx > 0 ? e.x + e.size : e.x - 1;
+        const ty = dy === 0 ? e.y + k : dy > 0 ? e.y + e.size : e.y - 1;
+        if (free(tx, ty)) return true;
+      }
+      return false;
+    };
+    const m = { n: es.length, hp: 0, maxHp: 0, open: 0, weakShut: 0, cramped: 0, hits: 0, hitsWeakOnly: 0, pressure: pressureOf(run, B, es), counter: 0, special: 0, kinds: {} };
+    for (const e of es) {
+      m.hp += e.hp; m.maxHp = Math.max(m.maxHp, e.hp); m.counter += e.atk || 0;
+      const open = CW.filter((w) => sideFree(e, w)).length;
+      const weakOk = !sealedBy(es, e) && weakSides(e).some((w) => sideFree(e, w));
+      m.open += open;
+      if (!weakOk) m.weakShut++;
+      const weakHit = S.atk * S.weakMult;
+      m.hits += Math.ceil(e.hp / (weakOk ? weakHit : S.atk));
+      m.hitsWeakOnly += Math.ceil(e.hp / weakHit);
+      for (const o of es) if (o.uid > e.uid && Math.max(Math.abs(o.x - e.x), Math.abs(o.y - e.y)) <= Math.max(e.size, o.size)) m.cramped++;
+      const k = SPECIAL[e.type];
+      if (k) { m.kinds[k] = (m.kinds[k] || 0) + 1; if (k !== "heavy") m.special++; }
+    }
+    m.avgHp = m.n ? m.hp / m.n : 0;
+    m.open = m.n ? m.open / m.n : 0;
+    // turns you would need if every blow were perfectly chained: hits against the move budget
+    m.reach = m.hits / Math.max(1, S.mov);
+    return m;
+  }
+
+  /* ---------- the floor ----------
+     A board must leave something to do. Not a difficulty dial: a board below the
+     floor is simply rerolled. Checks: at most one enemy with its weak side shut,
+     and some first route (from any start) kills at least one enemy. */
+  function firstKills(B, run, beam) {
+    beam = beam || 16;
+    let most = 0;
+    const saveHero = B.hero, saveTrail = B.trail;
+    for (const s of B.starts) {
+      B.hero = { x: s.x, y: s.y }; B.trail = [{ x: s.x, y: s.y }];
+      let frontier = [[{ x: s.x, y: s.y }]];
+      for (let depth = 0; depth < 12 && frontier.length; depth++) {
+        const next = [];
+        for (const route of frontier) {
+          const res = simulate(B, run, route);
+          if (res.outcome === "victory") { B.hero = saveHero; B.trail = saveTrail; return 99; }
+          if (res.outcome !== "ok") continue;
+          const cur = route[route.length - 1], blocked = blockedSet(B, route, res.T.cold);
+          for (const [dx, dy] of DIRS8) {
+            const nt = { x: cur.x + dx, y: cur.y + dy };
+            if (stepError(B, blocked, res.T.moves, cur, nt)) continue;
+            const r2 = route.concat([nt]), sim = simulate(B, run, r2);
+            if (sim.outcome === "dead") continue;
+            most = Math.max(most, sim.T.kills);
+            next.push({ r: r2, s: sim.T.kills * 100 + (sim.T.dmgDealt || 0) + sim.T.moves });
+          }
+        }
+        next.sort((a, b) => b.s - a.s);
+        frontier = next.slice(0, beam).map((n) => n.r);
+      }
+      if (most > 0) break;
+    }
+    B.hero = saveHero; B.trail = saveTrail;
+    return most;
+  }
+  function floorFails(B, run) {
+    const m = boardMetrics(B, run), out = [];
+    if (m.weakShut > 1) out.push("weakShut");
+    if (!firstKills(B, run)) out.push("noKill");
+    return out;
+  }
+
   EL.Logic = {
     CARD, CW, DIRS8, rngFrom, createRun, stats, genMap, nextNodes, genBattle, startCandidates,
     blockedSet, stepError, isWeakEntry, sealedBy, enemyAt, enemiesAt, covers, isRock, idx, inB,
     simulate, commitRoute, enemyPhase, genRewards, applyReward, heal, battleHeal, reachable, weakEntries,
     specOf: (B) => ({ loc: B.loc, rocks: B.tiles.map((v, i) => (v ? [i % B.w, Math.floor(i / B.w)] : null)).filter(Boolean), enemies: B.enemies.map((e) => ({ type: e.type, x: e.x, y: e.y, weak: e.weak, cd: e.cd })) }),
-    condReq, condProgress, pressureOf, cdThreat, arrowTiles, weakSides, OPP, enemyPressure, has, coolCount, canMove, unstick,
+    boardMetrics, firstKills, floorFails, condReq, condProgress, pressureOf, cdThreat, arrowTiles, weakSides, OPP, enemyPressure, has, coolCount, canMove, unstick,
     teleTiles, teleDmgAt, planTelegraphs, pushDist,
     objectiveState, claimObjectives,
   };
