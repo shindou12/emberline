@@ -703,10 +703,12 @@
       if (hereE.length) {
         const S = stats(run, T.hp);
         let bonus = 0;
-        if (run.heroId === "rue") bonus += Math.min(BAL.rushCap, T.straight - 1);
+        // Rue's rush is extra damage added last: the weak-side multiplier and armour don't touch it
+        const rush = run.heroId === "rue" ? Math.max(0, Math.min(BAL.rushCap, T.straight - 1)) : 0;
         if (has(run, "sigil") && T.straight - 1 >= 3) { bonus += 2; relicFx("sigil"); }
         if (has(run, "heart") && T.hp <= run.maxHp / 2) relicFx("heart");
         const base = S.atk + bonus;
+        bonus += rush;
         const tangled = hereE.length > 1 || hereE.some((e) => e.tangled);
         if (tangled) {
           // a tangle has no guard: every tangled body takes a weak-side hit, and the hit unties it
@@ -717,7 +719,7 @@
             T.hitCount[e.uid] = (T.hitCount[e.uid] || 0) + 1;
             if (!e.tangled) continue; // already cashed in this route
             untied.push(e);
-            const dmg = Math.floor(base * S.weakMult);
+            const dmg = Math.floor(base * S.weakMult) + rush;
             T.weakHits++; T.attacks++;
             rec.attacks.push({ uid: e.uid, dmg, weak: true, tangle: true, kill: e.hp - dmg <= 0 });
             damage(e, dmg, "hero", rec, { weak: true, tangle: true, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
@@ -749,6 +751,7 @@
             if (weak) { dmg = Math.floor(dmg * S.weakMult); T.weakHits++; }
             // heavy armour: a blow into its face is halved
             else if (D.ENEMIES[e.type].armor && !diag && entrySide(a, b) === OPP[e.weak]) { dmg = Math.ceil(dmg / 2); armored = true; }
+            dmg += rush;
             rec.attacks.push({ uid: e.uid, dmg, weak, forced, sealed, kill: e.hp - dmg <= 0, bonus });
             damage(e, dmg, "hero", rec, { weak, forced, sealed, armored, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
             const moved = !done && e.alive ? shove(e, d, rec) : false;

@@ -27,7 +27,7 @@
     },
     rue: {
       name: "ルゥ", title: "風の槍兵", sprite: "rue", hp: 30, atk: 3, mov: 7, refund: 2,
-      trait: "突進", traitText: "攻撃の直前にまっすぐ進んだマス数だけ攻撃+1（最大+3）。",
+      trait: "突進", traitText: "攻撃の直前にまっすぐ進んだマス数だけ、追加で1ダメージ（最大+3。弱点の倍率はかからない）。",
       style: "連鎖型。長い直線で突き抜け、倒して走り続けろ。", color: "#3fd6c0",
       stats: { hp: 2, atk: 3, mov: 4 },
     },
