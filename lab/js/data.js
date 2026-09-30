@@ -91,7 +91,7 @@
     knight: { name: "重装兵", sprite: "knight", hp: 14, atk: 2, pressure: 1, ai: "static", armor: true, desc: "正面（弱点の反対側）からの攻撃は半減。回り込め。" },
     drummer: { name: "鼓手", sprite: "drummer", hp: 6, atk: 0, pressure: 1, ai: "static", twoWeak: true, cd: 3, act: "drum", desc: "カウント0で、他の敵のカウントを全員1進める。脆い（弱点2つ）。" },
     sniper: { name: "狙撃手", sprite: "sniper", hp: 7, atk: 0, pressure: 1, ai: "static", cd: 3, act: "snipe", desc: "カウント0で、どこにいても主人公を撃つ（最大HPの3割）。斬れば1ターン遅らせられる。" },
-    bomber: { name: "爆ぜ殻", sprite: "bomber", hp: 9, atk: 1, pressure: 1, ai: "chase", bomb: { dmg: 5, over: 3 }, desc: "倒すと周囲1マスが爆発（5ダメージ、敵も巻き込む）。3以上の余剰ダメージで倒せば爆発しない。" },
+    bomber: { name: "爆ぜ殻", sprite: "bomber", hp: 9, atk: 1, pressure: 1, ai: "chase", bomb: { dmg: 5 }, desc: "倒すとその周囲1マスに爆発の予兆が出て、ルートの終わりに爆発する（5ダメージ、敵も巻き込む）。範囲の外で止まれば安全。" },
     herald: { name: "旗手", sprite: "herald", hp: 7, atk: 0, pressure: 1, ai: "static", twoWeak: true, cd: 2, act: "rally", desc: "カウント0で、全ての敵が主人公に正面を向ける（弱点が奥へ回る）。脆い（弱点2つ）。" },
   };
 

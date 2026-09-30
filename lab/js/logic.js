@@ -357,7 +357,10 @@
     const d = D.ENEMIES[e.type];
     e.tele = null;
     if (!d.tele || !e.alive) return;
-    const h = B.hero;
+    // before the opening spot is chosen, aim at the middle of the candidates so the
+    // first warnings don't change with the choice
+    const open = B.turn === 1 && !B.startLocked && B.starts && B.starts.length > 1;
+    const h = open ? { x: B.starts.reduce((a, t) => a + t.x, 0) / B.starts.length, y: B.starts.reduce((a, t) => a + t.y, 0) / B.starts.length } : B.hero;
     const cx = e.x + (e.size - 1) / 2, cy = e.y + (e.size - 1) / 2;
     let sx = sgn(h.x - cx), sy = sgn(h.y - cy);
     if (!sx && !sy) sy = 1;
@@ -467,7 +470,7 @@
       moves: S0.mov, hp: run.hp, chain: 0, kills: 0, weakHits: 0, dmgTaken: 0, attacks: 0,
       guardBlock: (run.heroId === "gorm" ? 1 : 0) + (has(run, "shade") ? 1 : 0), guardHits: 0,
       forcedWeak: 0, uses: {}, marks: {}, dirs: [], straight: 0, route: [route[0]],
-      compassUsed: false, plumeUsed: run.plumeUsed, bumps: 0, tangles: 0, multi: 0,
+      compassUsed: false, plumeUsed: run.plumeUsed, bumps: 0, tangles: 0, multi: 0, bombs: [], bombLog: [],
       cold: new Set(), coldAt: [false], hitCount: {}, touched: new Set(),
       delayed: new Set(), shot: new Set(), relicShown: new Set(),
     };
@@ -496,15 +499,14 @@
       push({ type: "kill", uid: e.uid, refund, chain: T.chain, moves: T.moves, src, x: e.x, y: e.y, size: e.size });
       if (bonusHeal) heal(bonusHeal);
       if (rec) rec.kills.push(e.uid);
-      const bomb = D.ENEMIES[e.type].bomb;
-      if (bomb && !done && (e.overkill || 0) < bomb.over) {
-        // it bursts: everything within one tile is hit, the hero included
-        push({ type: "explode", uid: e.uid, x: e.x, y: e.y });
-        const here = T.route[T.route.length - 1];
-        if (Math.max(Math.abs(here.x - e.x), Math.abs(here.y - e.y)) <= 1) heroHurt(bomb.dmg, e, "blast", rec);
-        for (const o of alive()) if (!done && o !== e && Math.max(Math.abs(o.x - e.x), Math.abs(o.y - e.y)) <= 1) damage(o, bomb.dmg, "bump", rec, { reason: "blast" });
-      }
       if (!alive().length) { outcome = "victory"; push({ type: "victory" }); done = true; }
+      // a husk that bursts: its shell is lit where it fell and blows at the end of the route
+      const bomb = D.ENEMIES[e.type].bomb;
+      if (bomb && !done) {
+        const b = { uid: e.uid, x: e.x, y: e.y, dmg: bomb.dmg };
+        T.bombs.push(b); T.bombLog.push(b);
+        push({ type: "bombSet", uid: e.uid, x: e.x, y: e.y });
+      }
     }
     function damage(e, dmg, src, rec, extra) {
       T.touched.add(e.uid);
@@ -514,7 +516,7 @@
       if (e.boss && !st.phase2 && e.hp > 0 && e.hp <= e.maxHp / 2) { st.phase2 = true; push({ type: "bossPhase", uid: e.uid }); }
       // a blow that leaves it standing sets its countdown back one turn (once per route)
       if (e.hp > 0 && e.cdMax && !T.delayed.has(e.uid) && e.cd < e.cdMax) { T.delayed.add(e.uid); e.cd++; push({ type: "delay", uid: e.uid, cd: e.cd }); }
-      if (e.hp <= 0) { e.overkill = -e.hp; kill(e, src, rec); }
+      if (e.hp <= 0) kill(e, src, rec);
     }
     function heroHurt(dmg, e, kind, rec) {
       T.hp -= dmg; T.dmgTaken += dmg;
@@ -769,7 +771,15 @@
       }
       rec.moves = T.moves; rec.hp = T.hp;
     }
+    // lit shells blow now: everything within one tile of each, the hero where the route ended included
     const endTile = route[last];
+    const blastRec = steps[steps.length - 1] || { kills: [], guards: [], pushes: [], attacks: [], skills: [] };
+    while (T.bombs.length && !done) {
+      const b = T.bombs.shift(), near = (p) => Math.max(Math.abs(p.x - b.x), Math.abs(p.y - b.y)) <= 1;
+      push({ type: "explode", uid: b.uid, x: b.x, y: b.y });
+      if (near(endTile)) heroHurt(b.dmg, b, "blast", blastRec);
+      for (const o of alive()) if (!done && near(o)) damage(o, b.dmg, "bump", blastRec, { reason: "blast" });
+    }
     const endBlocked = outcome === "ok" && enemiesAt(st.enemies, endTile.x, endTile.y).length > 0;
     const teleEnd = outcome === "ok" ? teleDmgAt(B, st.enemies, endTile.x, endTile.y) : 0;
     return { events, steps, st, T, outcome, last, end: endTile, endBlocked, teleEnd };

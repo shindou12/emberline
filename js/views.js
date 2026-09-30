@@ -440,6 +440,13 @@
           ar.poly.forEach((t, i) => { const c = tc(t.x, t.y); if (i) ctx.lineTo(c.x, c.y); else ctx.moveTo(c.x, c.y); });
           ctx.closePath(); ctx.fill();
           ctx.globalAlpha = 1;
+        } else if (ar.kind === "bomb") {
+          // a lit shell: it blows when the route ends
+          ctx.globalAlpha = 0.3 + 0.35 * fl;
+          for (const t of ar.tiles) { if (t.x < 0 || t.y < 0 || t.x >= GW || t.y >= GH) continue; A.dither(ctx, BX + t.x * T + 2, BY + t.y * T + 2, T - 4, T - 4, "#ff4d5e", Math.floor(this.t / 100) % 2); }
+          ctx.globalAlpha = 1;
+          const c = tc(ar.x, ar.y);
+          A.spr(ctx, "i_flame", c.x, c.y + 6 - (Math.floor(this.t / 160) % 2), { s: 2, ax: 0.5, ay: 1 });
         } else if (ar.kind === "pierce") {
           const a = tc(ar.from.x, ar.from.y), b = tc(ar.to.x, ar.to.y);
           ctx.fillStyle = C.emberL;
@@ -1315,7 +1322,7 @@
 
   /* ================= HUD ================= */
   class PlayerHUD extends EL.Node {
-    constructor() { super("PlayerHUD"); this.sprite = "kai"; this.name = ""; this.hp = 1; this.maxHp = 1; this.prev = null; this.shown = 1; this.shake = 0; this.t = 0; this.flash = 0; }
+    constructor() { super("PlayerHUD"); this.sprite = "kai"; this.name = ""; this.hp = 1; this.maxHp = 1; this.prev = null; this.nightPrev = 0; this.shown = 1; this.shake = 0; this.t = 0; this.flash = 0; }
     tick(dt) { this.t += dt; this.shown += (this.hp - this.shown) * Math.min(1, dt / 120); }
     draw(ctx) {
       const sx = this.shake ? U.snap(Math.sin(this.t / 20) * this.shake) : 0;
@@ -1342,6 +1349,15 @@
         const a = Math.round((w * Math.max(0, this.prev)) / this.maxHp);
         ctx.fillStyle = Math.floor(this.t / 120) % 2 ? "#ffffff" : "#ffd35a";
         ctx.fillRect(x + a, y, fw - a, h);
+      }
+      // the coming night on top: a see-through bite off the end of what the route leaves
+      if (this.nightPrev > 0) {
+        const base = Math.max(0, this.prev != null ? Math.min(this.prev, this.hp) : this.hp);
+        const b = Math.round((w * base) / this.maxHp), a = Math.round((w * Math.max(0, base - this.nightPrev)) / this.maxHp);
+        ctx.globalAlpha = 0.45 + 0.2 * Math.sin(this.t / 160);
+        ctx.fillStyle = base - this.nightPrev <= 0 ? "#ffffff" : "#b08cff";
+        ctx.fillRect(x + a, y, b - a, h);
+        ctx.globalAlpha = 1;
       }
       for (let i = 1; i < 6; i++) { ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.fillRect(x + Math.round((w * i) / 6), y, 2, h); }
       A.spr(ctx, "i_heart", x - 2, y + h + 1, { s: 2, ax: 0.5, ay: 1 });
@@ -1918,7 +1934,7 @@
     { t: "岩", b: "岩はマスごと塞ぐが、岩と岩の斜めのすき間は通れる。押された敵は岩や盤面の端にぶつかって止まり、もつれる。", demo: "wall" },
     { t: "弓兵と重装兵", b: "弓兵は正面3マス（緑の列）を射る。その列に踏み込むと2ダメージ（1ルート1回）。守られた奥の敵を狙うなら、あえて受けるのもあり。重装兵は正面（金の装甲）からの攻撃が半減。回り込んで背中を斬れ。", demo: "archer" },
     { t: "カウントダウン", b: "頭の数字は行動までのターン数。0で行動する。狙撃手はどこにいても撃ってくる、鼓手は他の敵の数字を進める、旗手は全員の正面をこちらに向ける。倒しきれなくても、斬るかぶつければ数字が1戻る。脆い敵は弱点が2つある。", demo: "count" },
-    { t: "爆ぜ殻", b: "倒すと周囲1マスが爆発し、主人公も敵も5ダメージ。余剰3以上のダメージで倒せば不発。押し出しや仲間の技で離れた所から倒すのも手。爆発で敵を巻き込むこともできる。", demo: "bomb" },
+    { t: "爆ぜ殻", b: "倒すと、その周りの1マスに爆発の予兆が出る。爆発するのはルートの終わり。そのとき範囲の中にいる主人公と敵に5ダメージ。範囲の外で止まれば安全で、敵を範囲に押し込めば巻き込める。", demo: "bomb" },
     { t: "攻撃予告", b: "骨砕きとボスは、次の敵ターンに攻撃するマスを黄色く予告する。そこで終わると被弾。押すと予告もずれるので、敵同士で撃たせることもできる。", demo: "tele" },
     { t: "撃破で移動回復", b: "敵を倒すと移動力が回復する（1ルートで最初の撃破は+2、2体目からは+1）。倒して、進んで、また倒す。長い連鎖が勝利への近道。", demo: "chain" },
     { t: "燠火の足跡", b: "歩いたマスは燃えて、しばらく入れない。斜めに交差するのはOK。敵がいたマスは燃えないので、もう一度踏み込める。仲間が増えるほど足跡は長く残る。", demo: "ember" },

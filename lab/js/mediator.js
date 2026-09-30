@@ -200,6 +200,17 @@
       if (!this.startOpen()) return null;
       return this.B.starts.find((s) => { const c = tc(s.x, s.y); return (d.tile && sameTile(d.tile, s)) || Math.hypot(d.px - c.x, d.py - c.y) < V.GEO.T * 0.7; }) || null;
     }
+    /* a press that began on another opening spot turns into a drag from there once it leaves the tile */
+    dragFromStart(d) {
+      const s = this.pendingStart;
+      if (!s || !d.tile || sameTile(d.tile, s)) return;
+      this.pendingStart = null; this.tapTile = null;
+      this.inspectStop();
+      this.setDragUI(false);
+      this.moveStart(s);
+      this.go("Battle.Dragging");
+      if (d.near) this.tryExtend(d.tile);
+    }
     moveStart(s) {
       const v = this.v, B = this.B;
       if (sameTile(s, B.hero)) return;
@@ -417,12 +428,18 @@
           if (sk.effect === "pierce") rt.areas.push({ kind: "pierce", from: sk.data.from, to: sk.data.target ? this.enemyTile(sk.data.target) : { x: sk.data.to.x - sk.data.dir[0], y: sk.data.to.y - sk.data.dir[1] } });
         }
       }
+      for (const b of res.T.bombLog) rt.areas.push(this.bombArea(b));
       // HUD previews
       v.moveHUD.prev = res.T.moves;
       v.playerHUD.prev = res.T.hp !== run.hp ? res.T.hp : null;
       v.pressureHUD.prev = L.pressureOf(run, B, res.st.enemies);
       v.pressureHUD.telePrev = res.teleEnd;
       rt.teleEnd = res.teleEnd;
+      // what the coming night will take on top of the route: pressure, a warned tile, a sniper at 1
+      let night = L.pressureOf(run, B, res.st.enemies);
+      if (run.relics.includes("afterglow")) night -= Math.min(night, Math.max(0, res.T.moves));
+      night += res.teleEnd + L.cdThreat(run, res.st.enemies);
+      v.playerHUD.nightPrev = res.outcome === "ok" ? night : 0;
       this.refreshBoardMarks(res.st.enemies, res.end);
       v.companionHUD.cards.forEach((c) => {
         if (!c.comp) return;
@@ -579,7 +596,7 @@
       for (const k in this.enemyViews) EL.tween(this.enemyViews[k], { emph: on ? 1 : 0 }, 180, { clock: "ui" });
       if (!on) {
         v.board.entries = []; v.board.reach = null;
-        v.moveHUD.prev = null; v.pressureHUD.prev = null; v.pressureHUD.telePrev = null; v.playerHUD.prev = null;
+        v.moveHUD.prev = null; v.pressureHUD.prev = null; v.pressureHUD.telePrev = null; v.playerHUD.prev = null; v.playerHUD.nightPrev = 0;
         v.route.pushes = []; v.route.guardHits = []; v.route.teleEnd = 0;
         this.clearTargets();
         if (this.B) this.refreshBoardMarks();
@@ -723,8 +740,18 @@
       w.cd = ev.cd; w.cdPop = 1; EL.tween(w, { cdPop: 0 }, 300, { clock: "ui" });
       this.v.floats.spawn("遅延+1", r.x + 12, r.y - 10, { kind: "jp", color: C.move, life: 700, vy: -30 });
     }
+    bombArea(b) {
+      const tiles = [];
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) tiles.push({ x: b.x + dx, y: b.y + dy });
+      return { kind: "bomb", uid: b.uid, x: b.x, y: b.y, tiles };
+    }
+    async ev_bombSet(ev) {
+      this.v.route.areas.push(this.bombArea(ev));
+      S.play("lock");
+    }
     async ev_explode(ev) {
       const v = this.v, c = tc(ev.x, ev.y);
+      v.route.areas = v.route.areas.filter((a) => !(a.kind === "bomb" && a.uid === ev.uid));
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) v.fx.tileFlash(ev.x + dx, ev.y + dy, "rgba(255,120,40,0.6)", 380);
       v.fx.burst(c.x, c.y, 50, { speed: [60, 260], life: [300, 700], palette: [C.ember, C.emberL, "#ff4d5e", C.cream], sizes: [2, 4], glow: true });
       v.fx.crumble(c.x - 20, c.y - 20, 40, 40, [C.ember, "#c24a12", "#5c5058", "#8a7f86", C.emberL], { block: 6, n: 16, speed: [90, 260], lift: 160, floor: c.y + 26 });
@@ -1444,12 +1471,15 @@
         const d = evt.data, B = this.B;
         if (d.phase === "begin") {
           const hc = tc(B.hero.x, B.hero.y);
-          const spot = this.startAt(d);
-          if (spot) { this.moveStart(spot); this.go("Battle.Dragging"); return; }
           const grabbed = (d.tile && sameTile(d.tile, B.hero)) || Math.hypot(d.px - hc.x, d.py - hc.y) < V.GEO.T * 0.85;
           if (grabbed) { this.go("Battle.Dragging"); return; }
+          // another opening spot: dragging from it starts there, a tap routes to it
+          this.pendingStart = this.startAt(d);
           this.armPress(d);
+        } else if (d.phase === "move") {
+          this.dragFromStart(d);
         } else if (d.phase === "end") {
+          this.pendingStart = null;
           this.tapPlan(d);
           this.tapTile = null;
         }
@@ -1503,15 +1533,14 @@
           return;
         }
         if (evt.type !== "route.input") return;
-        if (d.phase === "end") { this.tapPlan(d); this.tapTile = null; return; }
+        if (d.phase === "end") { this.pendingStart = null; this.tapPlan(d); this.tapTile = null; return; }
+        if (d.phase === "move") { this.dragFromStart(d); return; }
         if (d.phase !== "begin") return;
         const B = this.B, tip = this.route[this.route.length - 1];
         const near = (t) => { const c = tc(t.x, t.y); return Math.hypot(d.px - c.x, d.py - c.y) < V.GEO.T * 0.7; };
-        const spot = this.startAt(d);
         if (near(tip)) this.go("Battle.Dragging", this.route);
-        else if (spot) { this.setDragUI(false); this.moveStart(spot); this.go("Battle.Dragging"); }
         else if (near(B.hero)) this.go("Battle.Dragging");
-        else { this.armPress(d); }
+        else { this.pendingStart = this.startAt(d); this.armPress(d); }
       },
     },
 
