@@ -241,14 +241,18 @@
     }
     // a board below the floor (nothing to kill on the first route, weak sides walled off) is rerolled
     const cursed = !!run.flags.cursed;
+    // experiment (BAL.startMode): "center" / "center3" start in the middle with enemies all around,
+    // at least 2 / 3 tiles away
+    const mid = BAL.startMode && BAL.startMode.startsWith("center") ? { x: 3, y: 4 } : null;
+    const midGap = BAL.startMode === "center3" ? 3 : 2;
     run.flags.cursed = false;
     for (let attempt = 0; attempt < 8; attempt++) {
       B.tiles.fill(0); B.enemies = []; B.uidSeq = 0;
       // rocks
       const nRocks = ri(rng, 2, 4);
       for (let tries = 0, placed = 0; placed < nRocks && tries < 200; tries++) {
-        const x = ri(rng, 0, B.w - 1), y = ri(rng, 0, 6);
-        if (Math.abs(x - 3) <= 1 && y >= 6) continue;
+        const x = ri(rng, 0, B.w - 1), y = ri(rng, 0, mid ? B.h - 1 : 6);
+        if (mid ? cheb({ x, y }, mid) <= 1 : Math.abs(x - 3) <= 1 && y >= 6) continue;
         if (B.tiles[idx(B, x, y)]) continue;
         B.tiles[idx(B, x, y)] = 1;
         if (!connected(B, 3, 7)) { B.tiles[idx(B, x, y)] = 0; continue; }
@@ -264,7 +268,7 @@
       else list = rpick(rng, ENC.t3).slice();
       if (cursed) list.push("brute");
       const free = [];
-      for (let y = 0; y <= 5; y++) for (let x = 0; x < B.w; x++) if (!B.tiles[idx(B, x, y)]) free.push([x, y]);
+      for (let y = 0; y <= (mid ? B.h - 1 : 5); y++) for (let x = 0; x < B.w; x++) if (!B.tiles[idx(B, x, y)] && !(mid && cheb({ x, y }, mid) < midGap)) free.push([x, y]);
       const order = shuffle(rng, free);
       const spaced = (x, y) => !B.enemies.some((e) => Math.abs(e.x - x) <= 1 && Math.abs(e.y - y) <= 1);
       for (const type of list) {
@@ -273,7 +277,8 @@
         if (!spot) break;
         B.enemies.push(makeEnemy(B, type, spot[0], spot[1], rng));
       }
-      placeStart(B);
+      if (mid) { B.starts = [{ x: mid.x, y: mid.y }]; B.hero = { x: mid.x, y: mid.y }; B.trail = [{ x: mid.x, y: mid.y }]; }
+      else placeStart(B);
       if (!floorFails(B, run).length) break;
     }
     B.objectives = genObjectives(run, B);

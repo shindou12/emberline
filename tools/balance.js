@@ -11,6 +11,8 @@
 global.window = global.window || { EL: {} };
 require("../js/data.js");
 require("../js/logic.js");
+// experiments: EL_START=center plays every hallway board from the middle
+if (process.env.EL_START) window.EL.Data.BAL.startMode = process.env.EL_START;
 const EL = window.EL, L = EL.Logic, D = EL.Data;
 
 const PROFILES = {
@@ -150,7 +152,7 @@ function measure(N, heroes) {
       const r = playRun(h, 1000 + i * 7919);
       out.runs++;
       if (r.win) { w++; out.wins++; } else out.deaths[r.log.died] = (out.deaths[r.log.died] || 0) + 1;
-      for (const [t, n, lost] of r.log.turns) { const p = (out.perType[t] = out.perType[t] || { turns: 0, dmg: 0, n: 0 }); p.turns += n; p.dmg += lost; p.n++; }
+      for (const [t, n, lost] of r.log.turns) { const p = (out.perType[t] = out.perType[t] || { turns: 0, dmg: 0, n: 0, one: 0 }); p.turns += n; p.dmg += lost; p.n++; if (n === 1) p.one++; }
       for (const [row, f] of Object.entries(r.log.hpByRow)) { const a = (out.hpRow[row] = out.hpRow[row] || [0, 0]); a[0] += f; a[1]++; }
     }
     out.byHero[h] = w;
@@ -207,7 +209,7 @@ function report(results, N, heroes) {
       console.log("  負けた場所 " + Object.entries(r.deaths).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${DEATH[k] || k} ${pct(n, losses)}%`).join("  "));
       if ((r.deaths.boss || 0) / losses > 0.7 && losses >= 5) console.log("  ! 負けの7割以上がボス戦: 道中が簡単でボスだけ難しい「難易度の崖」");
     }
-    const t = (k) => r.perType[k] ? `${(r.perType[k].turns / r.perType[k].n).toFixed(1)}T / 被ダメ${(r.perType[k].dmg / r.perType[k].n).toFixed(1)}` : "-";
+    const t = (k) => r.perType[k] ? `${(r.perType[k].turns / r.perType[k].n).toFixed(1)}T / 被ダメ${(r.perType[k].dmg / r.perType[k].n).toFixed(1)} / 1T制圧${pct(r.perType[k].one || 0, r.perType[k].n)}%` : "-";
     console.log(`  通常戦 ${t("battle")}   強敵 ${t("elite")}   ボス ${t("boss")}`);
     const rows = Object.keys(r.hpRow).sort((a, b) => a - b);
     console.log("  HP推移(層ごとの残りHP%) " + rows.map((k) => `${+k + 1}層:${Math.round((100 * r.hpRow[k][0]) / r.hpRow[k][1])}`).join(" "));

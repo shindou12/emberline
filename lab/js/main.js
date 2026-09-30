@@ -165,6 +165,9 @@
       v.root.render(ctx);
       requestAnimationFrame(frame);
     }
+    // experiment: ?start=center (or center3) starts hallway battles in the middle of the board
+    const sm = location.search.match(/[?&]start=(center3?)\b/);
+    if (sm) EL.Data.BAL.startMode = sm[1];
     // the lab site (?lab, or a page that sets EL_LAB) opens on the board picker
     med.go(/[?&]lab\b/.test(location.search) || window.EL_LAB ? "LabMenu" : "Title");
     requestAnimationFrame(frame);
