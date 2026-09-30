@@ -888,7 +888,13 @@
     }
     // 4b. the night grows on every enemy you left alone this turn (+1 pressure from next turn on)
     const grown = [];
-    for (const e of alive()) if (!(B.touched && B.touched.has(e.uid))) { e.grow = (e.grow || 0) + 1; grown.push(e.uid); }
+    // (experiments: BAL.growFromTurn skips the first turns, BAL.growStreak needs that many untouched turns in a row)
+    for (const e of alive()) {
+      if (B.touched && B.touched.has(e.uid)) { e.idle = 0; continue; }
+      e.idle = (e.idle || 0) + 1;
+      if (B.turn < (BAL.growFromTurn || 1) || e.idle < (BAL.growStreak || 1)) continue;
+      e.grow = (e.grow || 0) + 1; grown.push(e.uid);
+    }
     B.touched = null;
     if (grown.length) push({ type: "grow", uids: grown });
     // 4c. countdowns tick (a tangled enemy is stunned and holds its count); at 0 it acts
@@ -1145,6 +1151,8 @@
     p += e.grow || 0;
     return Math.max(0, p);
   }
+  /* would this enemy's pressure grow tonight if the route leaves it untouched? */
+  const willGrow = (B, e) => B.turn >= (BAL.growFromTurn || 1) && (e.idle || 0) + 1 >= (BAL.growStreak || 1);
   const snipeDmg = (run) => Math.round(run.maxHp * 0.3);
   /* for previews and bots: what the countdowns will do to the hero this coming night */
   function cdThreat(run, enemies) {
@@ -1241,7 +1249,7 @@
   EL.Logic = {
     CARD, CW, DIRS8, rngFrom, createRun, stats, genMap, nextNodes, genBattle, startCandidates,
     blockedSet, stepError, isWeakEntry, sealedBy, enemyAt, enemiesAt, covers, isRock, idx, inB,
-    simulate, commitRoute, enemyPhase, genRewards, applyReward, heal, battleHeal, reachable, weakEntries,
+    simulate, commitRoute, enemyPhase, willGrow, genRewards, applyReward, heal, battleHeal, reachable, weakEntries,
     specOf: (B) => ({ loc: B.loc, rocks: B.tiles.map((v, i) => (v ? [i % B.w, Math.floor(i / B.w)] : null)).filter(Boolean), enemies: B.enemies.map((e) => ({ type: e.type, x: e.x, y: e.y, weak: e.weak, cd: e.cd })) }),
     boardMetrics, firstKills, floorFails, condReq, condProgress, pressureOf, cdThreat, arrowTiles, weakSides, OPP, enemyPressure, has, coolCount, canMove, unstick,
     teleTiles, teleDmgAt, planTelegraphs, pushDist,

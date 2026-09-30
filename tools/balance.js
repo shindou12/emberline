@@ -13,6 +13,9 @@ require("../js/data.js");
 require("../js/logic.js");
 // experiments: EL_START=center plays every hallway board from the middle
 if (process.env.EL_START) window.EL.Data.BAL.startMode = process.env.EL_START;
+// EL_MOV=1 adds to every hero's moves; EL_BAL="refundDecay=0,..." overrides balance numbers
+if (process.env.EL_MOV) for (const h of Object.values(window.EL.Data.HEROES)) h.mov += +process.env.EL_MOV;
+if (process.env.EL_BAL) for (const kv of process.env.EL_BAL.split(",")) { const [k, v] = kv.split("="); window.EL.Data.BAL[k] = +v; }
 const EL = window.EL, L = EL.Logic, D = EL.Data;
 
 const PROFILES = {

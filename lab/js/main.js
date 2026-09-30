@@ -168,6 +168,9 @@
     // experiment: ?start=center (or center3) starts hallway battles in the middle of the board
     const sm = location.search.match(/[?&]start=(center3?)\b/);
     if (sm) EL.Data.BAL.startMode = sm[1];
+    // experiment: ?grow=turn2 (no neglect growth on turn 1) / ?grow=streak2 (two untouched turns in a row)
+    const gm = location.search.match(/[?&]grow=(turn2|streak2)\b/);
+    if (gm) EL.Data.BAL[gm[1] === "turn2" ? "growFromTurn" : "growStreak"] = 2;
     // the lab site (?lab, or a page that sets EL_LAB) opens on the board picker
     med.go(/[?&]lab\b/.test(location.search) || window.EL_LAB ? "LabMenu" : "Title");
     requestAnimationFrame(frame);
