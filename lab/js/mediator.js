@@ -194,6 +194,18 @@
       this.refreshBoardMarks();
       this.coolPreview();
     }
+    /* opening choice on screen: ghosts on every spot and no solid hero until a route starts from one */
+    showStartChoice(on) {
+      const v = this.v, B = this.B;
+      on = on && this.startOpen();
+      v.board.starts = on ? B.starts.slice() : [];
+      v.board.startSprite = on ? D.HEROES[this.run.heroId].sprite : null;
+      v.hero.alpha = on ? 0 : 1;
+      this.compViews.forEach((u) => (u.alpha = on ? 0.35 : 1));
+      // no spot looks picked yet: no ember under the default one, no hero highlight
+      if (on) { EL.tweens.kill(v.footprints); v.footprints.alpha = 0; } else if (!v.footprints.alpha) v.footprints.alpha = 1;
+      v.board.heroTile = on ? null : { x: B.hero.x, y: B.hero.y };
+    }
     /* opening: until the first route runs, the hero may start from any candidate spot */
     startOpen() { return this.B && !this.B.startLocked && this.B.starts && this.B.starts.length > 1; }
     startAt(d) {
@@ -1442,7 +1454,8 @@
         v.hero.aura = 0; v.hero.shield = 0;
         this.coolPreview();
         v.route.pts = [];
-        if (this.startOpen()) this.hint("光るマスからなぞるか、行き先をタップ");
+        this.showStartChoice(true);
+        if (this.startOpen()) this.hint("どちらかの主人公からなぞって出発");
         else this.hint(this.first ? "なぞるか、行き先のマスをタップしてルートを作ろう" : `ルートを描いて切り抜けろ — 残り${B.enemies.length}体`);
         // boxed in by embers? the oldest embers crumble until a way opens
         if (!L.canMove(B)) {
@@ -1490,6 +1503,7 @@
       enter(resume) {
         const v = this.v;
         S.play("grab");
+        this.showStartChoice(false);
         this.showActions(false);
         v.hero.sq = 0.15; EL.tween(v.hero, { sq: 0 }, 200, { clock: "ui", ease: U.ease.outBack });
         this.setDragUI(true);
@@ -1514,6 +1528,7 @@
     "Battle.Planned": {
       enter(route) {
         this.route = route;
+        this.showStartChoice(false);
         this.updatePreview(true);
         this.showActions(true);
         this.hint("");
@@ -1540,7 +1555,7 @@
         const near = (t) => { const c = tc(t.x, t.y); return Math.hypot(d.px - c.x, d.py - c.y) < V.GEO.T * 0.7; };
         if (near(tip)) this.go("Battle.Dragging", this.route);
         else if (near(B.hero)) this.go("Battle.Dragging");
-        else { this.pendingStart = this.startAt(d); this.armPress(d); }
+        else this.armPress(d);
       },
     },
 

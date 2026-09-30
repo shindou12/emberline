@@ -122,7 +122,7 @@
       this.tiles = new Array(GW * GH).fill(0);
       this.dim = 0; this.reach = null; this.entries = []; this.entryEmph = 0; this.t = 0; this.cursor = null; this.heroTile = null; this.heroHint = 0;
       this.loc = "temple";
-      this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.seals = []; this.starts = []; this.arrows = [];
+      this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.seals = []; this.starts = []; this.startSprite = null; this.arrows = [];
     }
     /* raw pointer → route input event (geometry only; legality decided elsewhere) */
     routeInput(phase, p) {
@@ -196,8 +196,8 @@
       }
       // opening spots: any of them can be the start of the first route
       for (const s of this.starts) {
-        if (this.heroTile && s.x === this.heroTile.x && s.y === this.heroTile.y) continue;
         const px = s.x * T, py = s.y * T;
+        if (this.heroTile && s.x === this.heroTile.x && s.y === this.heroTile.y) continue;
         const k = 0.5 + 0.5 * Math.sin(this.t / 180 + s.x);
         ctx.globalAlpha = 0.18 + 0.14 * k;
         A.dither(ctx, px + 4, py + 4, T - 8, T - 8, C.emberL, Math.floor(this.t / 220) % 2);
@@ -313,6 +313,22 @@
   V.BoardView = BoardView;
 
   /* the ember trail: every tile walked burns until it cools */
+  /* before the opening spot is chosen: a see-through hero waits on every candidate */
+  class StartGhostView extends EL.Node {
+    constructor(board) { super("StartGhosts"); this.board = board; this.t = 0; }
+    tick(dt) { this.t += dt; }
+    draw(ctx) {
+      const b = this.board;
+      if (!b.startSprite) return;
+      for (const s of b.starts) {
+        const c = tc(s.x, s.y), bob = Math.sin(this.t / 260 + s.x) > 0.3 ? -2 : 0;
+        ctx.fillStyle = "rgba(0,0,0,0.3)"; A.pellipse(ctx, c.x, c.y + 19, 11, 4, true);
+        A.spr(ctx, b.startSprite, c.x, c.y + 18 + bob, { s: 2, alpha: 0.5 + 0.15 * Math.sin(this.t / 200 + s.y) });
+      }
+    }
+  }
+  V.StartGhostView = StartGhostView;
+
   class FootprintView extends EL.Node {
     constructor() { super("Footprints"); this.trail = []; this.cool = 0; this.births = new Map(); this.ashes = []; this.t = 0; this.heat = 1; this.sparks = []; }
     tick(dt) {

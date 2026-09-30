@@ -26,6 +26,7 @@
     const battleWorld = (v.battleWorld = worldLayer.add(new EL.Node("BattleWorld")));
     v.board = battleWorld.add(new V.BoardView());
     v.footprints = battleWorld.add(new V.FootprintView());
+    battleWorld.add(new V.StartGhostView(v.board));
     v.route = battleWorld.add(new V.RoutePreviewView());
     const depth = battleWorld.add(new V.DepthSortView()); // y-sorted: enemies and units
     v.enemies = depth.add(new EL.Node("Enemies"));
