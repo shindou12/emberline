@@ -390,7 +390,7 @@
         const dmg = e.hp - Math.max(0, p.hp);
         if (dmg > 0 || !p.alive) { ev.target = true; ev.dmg = dmg; ev.kill = !p.alive; ev.refund = !p.alive ? refundOf[e.uid] || 0 : 0; }
         if (!p.alive) kills++;
-        ev.willGrow = p.alive && !res.T.touched.has(e.uid) && this.route.length > 1 && L.willGrow(this.B, e);
+        ev.willGrow = p.alive && !res.T.touched.has(e.uid) && this.route.length > 1;
         if (p.alive && e.cdMax && p.cd !== e.cd) ev.cdPrev = p.cd;
       }
       rt.skillMarks = []; rt.areas = []; rt.pushes = []; rt.guardHits = [];
