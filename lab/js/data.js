@@ -14,6 +14,7 @@
     healAfterBattle: 4, // Kai's trait only: other heroes do not heal after a battle
     restHealPct: 0.35,
     maxCompanions: 3,
+    rushCap: 3, // Rue: most attack gained from running straight
     maxRows: 7, // rows before the boss
   };
 

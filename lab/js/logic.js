@@ -703,7 +703,7 @@
       if (hereE.length) {
         const S = stats(run, T.hp);
         let bonus = 0;
-        if (run.heroId === "rue") bonus += Math.min(3, T.straight - 1);
+        if (run.heroId === "rue") bonus += Math.min(BAL.rushCap, T.straight - 1);
         if (has(run, "sigil") && T.straight - 1 >= 3) { bonus += 2; relicFx("sigil"); }
         if (has(run, "heart") && T.hp <= run.maxHp / 2) relicFx("heart");
         const base = S.atk + bonus;

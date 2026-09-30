@@ -190,7 +190,7 @@
       v.combo.chain = 0; v.combo.alpha = 0;
       v.turnHUD.turn = B.turn; v.turnHUD.floor = this.floorText();
       v.objHUD.setObjectives(B.objectives);
-      v.board.starts = B.startLocked ? [] : (B.starts || []).slice();
+      this.showStartChoice(!B.startLocked); // ghosts from the first frame, never a solid hero before the choice
       this.refreshBoardMarks();
       this.coolPreview();
     }
@@ -594,6 +594,13 @@
       if (!this.tapTile || !d.tile || !sameTile(this.tapTile, d.tile)) return;
       const e = L.enemyAt(B.enemies, d.tile.x, d.tile.y);
       if (EL.Time.ui - this.tapT > 420) { if (e) this.enemyInfo(e); return; }
+      if (this.state === "Battle.Idle" && this.startOpen()) {
+        // before the choice a tap draws from the nearest opening spot (another one, if a spot itself was tapped)
+        const cheb = (a) => Math.max(Math.abs(a.x - d.tile.x), Math.abs(a.y - d.tile.y));
+        const pool = B.starts.filter((s) => !sameTile(s, d.tile));
+        const best = pool.reduce((m, s) => (!m || cheb(s) < cheb(m) ? s : m), null);
+        if (best) this.moveStart(best);
+      }
       if (sameTile(d.tile, B.hero) && this.state === "Battle.Idle") return;
       if (this.state === "Battle.Idle") { this.beginRoute(); this.setDragUI(true); }
       this.routeTo(d.tile);
@@ -1484,10 +1491,10 @@
         const d = evt.data, B = this.B;
         if (d.phase === "begin") {
           const hc = tc(B.hero.x, B.hero.y);
-          const grabbed = (d.tile && sameTile(d.tile, B.hero)) || Math.hypot(d.px - hc.x, d.py - hc.y) < V.GEO.T * 0.85;
-          if (grabbed) { this.go("Battle.Dragging"); return; }
-          // another opening spot: dragging from it starts there, a tap routes to it
+          // any opening spot while choosing: dragging from it starts there, a tap routes to it
           this.pendingStart = this.startAt(d);
+          const grabbed = (d.tile && sameTile(d.tile, B.hero)) || Math.hypot(d.px - hc.x, d.py - hc.y) < V.GEO.T * 0.85;
+          if (grabbed && !this.pendingStart) { this.go("Battle.Dragging"); return; }
           this.armPress(d);
         } else if (d.phase === "move") {
           this.dragFromStart(d);
