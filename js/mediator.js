@@ -835,7 +835,7 @@
       this.layoutStacks();
       const c = tc(ev.x, ev.y);
       v.fx.ring(c.x, c.y, 34, "#b08cff", 360, 4);
-      v.floats.spawn("もつれ！", c.x, c.y - 44, { kind: "jp", color: "#e9dcff", life: 900, vy: -30 });
+      v.floats.spawn(ev.reason === "back" ? "崩れ！" : "もつれ！", c.x, c.y - 44, { kind: "jp", color: "#e9dcff", life: 900, vy: -30 });
 
       S.play("chime");
       await EL.wait(160);
@@ -1029,6 +1029,14 @@
       const k = this.relicFloats.push(now) - 1;
       v.floats.spawn(r.name, Math.min(300, 6 + i * 23 + 40), 96 + k * 18, { kind: "jp", size: 12, color: C.gold, life: 1100, vy: -8, screen: true });
       S.play("hover");
+      await EL.wait(60);
+    }
+    /* breakMode: breaking an enemy gives the route a little momentum */
+    async ev_break(ev) {
+      const v = this.v, w = this.enemyViews[ev.uid];
+      v.moveHUD.moves = ev.moves;
+      if (w) { const r = w.rect(); v.floats.spawn("+" + ev.refund + " MOVE", r.x + r.s / 2, r.y - 4, { s: 2, color: C.move, life: 800, vy: -30 }); }
+      S.play("refund", 2);
       await EL.wait(60);
     }
     async ev_relic(ev) {
