@@ -15,7 +15,8 @@
     restHealPct: 0.35,
     maxCompanions: 3,
     rushCap: 3, // Rue: most attack gained from running straight
-    breakMode: false, breakRefund: 1, // experiment: refunds come from breaking enemies, not killing them
+    breakMode: false, breakRefund: 1, backBreak: 1, // experiment: refunds come from breaking enemies, not killing them
+    pushByRun: false, // experiment: shove distance follows the straight run-up
     maxRows: 7, // rows before the boss
   };
 

@@ -550,7 +550,8 @@
        Returns true when it actually slid. */
     function shove(e, d, rec) {
       if (e.boss || e.size > 1) return false;
-      const n = pushDist(run);
+      // experiment (BAL.pushByRun): the run-up decides the shove — straight steps before the blow, minus one, up to 3
+      const n = BAL.pushByRun ? Math.min(3, Math.max(0, T.straight - 1)) + pushDist(run) - BAL.pushDist : pushDist(run);
       const ember = blockedSet(B, T.route, T.cold);
       const from = { x: e.x, y: e.y }, path = [];
       let stop = null, other = [];
@@ -766,7 +767,7 @@
             damage(e, dmg, "hero", rec, { weak, forced, sealed, armored, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
             const moved = !done && e.alive ? shove(e, d, rec) : false;
             // breakMode: a blow from behind breaks the enemy instead of doubling the damage
-            if (BAL.breakMode && weak && !done && e.alive && !e.tangled) {
+            if (BAL.breakMode && BAL.backBreak && weak && !done && e.alive && !e.tangled) {
               e.tangled = true; T.tangles++;
               push({ type: "tangle", uid: e.uid, x: e.x, y: e.y, uids: [e.uid], pile: false, reason: "back" });
               breakOne(e);

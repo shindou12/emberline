@@ -171,6 +171,8 @@
     if (sm) EL.Data.BAL.startMode = sm[1];
     // experiment: ?break=1 (refunds come from breaking enemies), ?mov=N adds to every hero's moves
     if (/[?&]break=1\b/.test(location.search)) EL.Data.BAL.breakMode = true;
+    if (/[?&]run=1\b/.test(location.search)) EL.Data.BAL.pushByRun = true;
+    if (/[?&]back=0\b/.test(location.search)) EL.Data.BAL.backBreak = 0;
     const mm = location.search.match(/[?&]mov=(\d)\b/);
     if (mm) for (const h of Object.values(EL.Data.HEROES)) h.mov += +mm[1];
     // the lab site (?lab, or a page that sets EL_LAB) opens on the board picker
