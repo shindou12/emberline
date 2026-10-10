@@ -52,6 +52,23 @@ function score(res, B, run, prof) {
   if (hpLeft - pressure <= 0) return -5e5;
   return T.kills * 30 + dmg * 3 - (run.hp - hpLeft) * 4 - pressure * 6 + T.moves * 0.5 - near * 3 + room * 0.4 + T.tangles * 4 - urgent * 12;
 }
+/* break / run-up experiments: a route that is lined up to charge an enemy, or that has already broken
+   some, is worth keeping in the search even before the blow lands (used for pruning only) */
+function potential(res, B) {
+  if (!D.BAL.breakMode && !D.BAL.pushByRun) return 0;
+  const T = res.T;
+  let p = T.breaks * 6;
+  const d = T.dirs[T.dirs.length - 1];
+  if (D.BAL.pushByRun && d && res.outcome === "ok") {
+    const end = res.end;
+    for (let k = 1; k <= 3; k++) {
+      const x = end.x + d[0] * k, y = end.y + d[1] * k;
+      if (x < 0 || y < 0 || x >= B.w || y >= B.h || B.tiles[y * B.w + x] === 1) break;
+      if (res.st.enemies.some((e) => e.alive && x >= e.x && y >= e.y && x < e.x + e.size && y < e.y + e.size)) { p += Math.min(4, T.straight) * 4; break; }
+    }
+  }
+  return p;
+}
 function bestRoute(B, run, beam, prof) {
   prof = prof || PROF;
   beam = beam || prof.beam;
@@ -71,7 +88,7 @@ function bestRoute(B, run, beam, prof) {
         const r2 = L.simulate(B, run, route);
         const s = score(r2, B, run, prof);
         if (!r2.endBlocked && s > bestS) { bestS = s; best = route; }
-        next.push({ route, res: r2, s });
+        next.push({ route, res: r2, s: s + potential(r2, B) });
       }
     }
     next.sort((a, b) => b.s - a.s);
@@ -123,13 +140,15 @@ function playRun(heroId, seed) {
     const n = nodes[0];
     run.nodeId = n.id; run.visited.push(n.id);
     log.types.push(n.type);
+    const kind = n.final ? "boss" : n.type; // the last battle of the simple run is reported as the boss
     if (n.type === "battle" || n.type === "elite" || n.type === "boss") {
       const hp0 = run.hp;
       const r = battle(run, n);
-      log.turns.push([n.type, r.turns, hp0 - run.hp]);
+      log.turns.push([kind, r.turns, hp0 - run.hp]);
       log.hp.push(run.hp);
-      if (!r.win) { log.died = n.type === "boss" ? "boss" : n.type === "elite" ? "elite" : n.row <= 2 ? "early" : n.row <= 4 ? "mid" : "late"; return { win: false, log, run }; }
-      if (n.type === "boss") return { win: true, log, run };
+      const mid = D.BAL.simple ? 5 : 4;
+      if (!r.win) { log.died = kind === "boss" ? "boss" : n.type === "elite" ? "elite" : n.row <= 2 ? "early" : n.row <= mid ? "mid" : "late"; return { win: false, log, run }; }
+      if (kind === "boss") return { win: true, log, run };
       L.battleHeal(run);
       const rw = L.genRewards(run, n.type === "elite" ? "elite" : "battle");
       const pick = rw.find((r) => r.kind === "comp") || rw[0];

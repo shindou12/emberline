@@ -60,6 +60,21 @@
 
   /* ---------- map ---------- */
   function genMap(rng) {
+    if (BAL.simple) {
+      // one road: simpleRows battles (the last a crowd of strong enemies) with campfires after the listed ones
+      const n = BAL.simpleRows, seq = [];
+      for (let b = 0; b < n; b++) {
+        seq.push({ type: b === n - 1 ? "elite" : "battle", row: b, final: b === n - 1 });
+        if (BAL.simpleRests.includes(b + 1) && b < n - 1) seq.push({ type: "rest", row: b });
+      }
+      const nodes = {}, rows = [], gap = Math.min(46, 410 / (seq.length - 1));
+      seq.forEach((s, i) => {
+        const id = `n${i}_0`;
+        nodes[id] = { id, row: s.row, col: 0, type: s.type, final: !!s.final, next: i < seq.length - 1 ? [`n${i + 1}_0`] : [], x: 180 + (i % 2 ? 26 : -26), y: Math.round(578 - i * gap) };
+        rows.push([id]);
+      });
+      return { nodes, rows, boss: null };
+    }
     const ROWS = BAL.maxRows, COLS = 4;
     const cells = [...Array(ROWS)].map(() => Array(COLS).fill(false));
     const edges = [];
@@ -209,6 +224,7 @@
     const rng = run.rng;
     const B = { w: BAL.GW, h: BAL.GH, tiles: new Array(BAL.GW * BAL.GH).fill(0), enemies: [], hero: { x: 3, y: 7 }, trail: [], turn: 1, kind: node.type, isBoss: node.type === "boss", phase2: false, uidSeq: 0, row: node.row, bst: { chain: 0, weak: 0, bumps: 0, multi: 0, guardHits: 0, friendly: 0 }, objectives: [] };
     B.trail = [{ x: 3, y: 7 }];
+    B.final = !!node.final;
     B.loc = pickLocation(rng, node);
     // a saved board (lab scenarios): rocks and enemies exactly as recorded
     if (node.spec) {
@@ -265,7 +281,10 @@
       // enemies
       let list;
       const row = node.row;
-      if (node.type === "elite") { list = rpick(rng, ENC.elite).slice(); if (row >= 5) list.push("husk"); }
+      if (node.final) list = rpick(rng, ENC.elite).concat(["knight", "shield"]);
+      // the one-road run: 4 enemies in battles 1-4, 5 in battles 5-9 (strong enemies only in the last one)
+      else if (BAL.simple) list = row <= 3 ? rpick(rng, row <= 1 ? ENC.t0 : ENC.t1).slice(0, 4) : rpick(rng, row <= 5 ? ENC.t1 : ENC.t2).slice(0, 5);
+      else if (node.type === "elite") { list = rpick(rng, ENC.elite).slice(); if (row >= 5) list.push("husk"); }
       else if (row === 0) list = rpick(rng, ENC.t0).slice();
       else if (row <= 2) list = rpick(rng, ENC.t1).slice();
       else if (row <= 4) list = rpick(rng, ENC.t2).slice();
@@ -470,7 +489,7 @@
       moves: S0.mov, hp: run.hp, chain: 0, kills: 0, weakHits: 0, dmgTaken: 0, attacks: 0,
       guardBlock: (run.heroId === "gorm" ? 1 : 0) + (has(run, "shade") ? 1 : 0), guardHits: 0,
       forcedWeak: 0, uses: {}, marks: {}, dirs: [], straight: 0, route: [route[0]],
-      compassUsed: false, plumeUsed: run.plumeUsed, bumps: 0, tangles: 0, multi: 0, bombs: [], bombLog: [], broke: new Set(), breaks: 0,
+      compassUsed: false, plumeUsed: run.plumeUsed, bumps: 0, tangles: 0, multi: 0, bombs: [], bombLog: [],
       cold: new Set(), coldAt: [false], hitCount: {}, touched: new Set(),
       delayed: new Set(), shot: new Set(), relicShown: new Set(),
     };
@@ -486,20 +505,11 @@
       T.hp = Math.min(run.maxHp, T.hp + n);
       if (T.hp > before) push({ type: "heal", amount: T.hp - before, hp: T.hp });
     };
-    // experiment (BAL.breakMode): the moment an enemy is broken (tangled) the route gains a little
-    // momentum, once per enemy per route
-    function breakOne(e) {
-      if (!BAL.breakMode || !e.alive || T.broke.has(e.uid)) return;
-      T.broke.add(e.uid); T.breaks++;
-      T.moves += BAL.breakRefund;
-      push({ type: "break", uid: e.uid, refund: BAL.breakRefund, moves: T.moves });
-    }
     function kill(e, src, rec) {
       e.alive = false;
       T.kills++; T.chain++;
       // the first kill of a route refunds in full, later kills one less
-      // (experiment BAL.breakMode: kills refund nothing, breaking an enemy does)
-      let refund = BAL.breakMode ? 0 : stats(run, T.hp).refund - (T.kills > 1 ? BAL.refundDecay : 0);
+      let refund = stats(run, T.hp).refund - (T.kills > 1 ? BAL.refundDecay : 0);
       let bonusHeal = 0;
       if (has(run, "chain") && T.chain >= 3) { refund += 1; bonusHeal = 1; relicFx("chain"); }
       if (has(run, "rope") && e.tangled) { refund += 1; relicFx("rope"); }
@@ -550,8 +560,7 @@
        Returns true when it actually slid. */
     function shove(e, d, rec) {
       if (e.boss || e.size > 1) return false;
-      // experiment (BAL.pushByRun): the run-up decides the shove — straight steps before the blow, minus one, up to 3
-      const n = BAL.pushByRun ? Math.min(3, Math.max(0, T.straight - 1)) + pushDist(run) - BAL.pushDist : pushDist(run);
+      const n = pushDist(run);
       const ember = blockedSet(B, T.route, T.cold);
       const from = { x: e.x, y: e.y }, path = [];
       let stop = null, other = [];
@@ -585,7 +594,6 @@
       if (stop === "full" && other[0] && !other[0].boss) members.push(other[0]);
       members.forEach((m) => (m.tangled = true));
       push({ type: "tangle", uid: e.uid, x: e.x, y: e.y, uids: members.map((m) => m.uid), pile: stop === "tangle", reason: stop });
-      members.forEach(breakOne);
       const extra = stop === "ember" && has(run, "emberhand") ? 2 : 0;
       if (extra) relicFx("emberhand");
       damage(e, bump + extra, "bump", rec, { reason: stop });
@@ -759,19 +767,13 @@
             if (weak) relicFx("dirk");
             T.attacks++;
             let dmg = base, armored = false;
-            if (weak) { if (!BAL.breakMode) dmg = Math.floor(dmg * S.weakMult); T.weakHits++; }
+            if (weak) { dmg = Math.floor(dmg * S.weakMult); T.weakHits++; }
             // heavy armour: a blow into its face is halved
             else if (D.ENEMIES[e.type].armor && !diag && entrySide(a, b) === OPP[e.weak]) { dmg = Math.ceil(dmg / 2); armored = true; }
             dmg += rush;
             rec.attacks.push({ uid: e.uid, dmg, weak, forced, sealed, kill: e.hp - dmg <= 0, bonus });
             damage(e, dmg, "hero", rec, { weak, forced, sealed, armored, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
             const moved = !done && e.alive ? shove(e, d, rec) : false;
-            // breakMode: a blow from behind breaks the enemy instead of doubling the damage
-            if (BAL.breakMode && BAL.backBreak && weak && !done && e.alive && !e.tangled) {
-              e.tangled = true; T.tangles++;
-              push({ type: "tangle", uid: e.uid, x: e.x, y: e.y, uids: [e.uid], pile: false, reason: "back" });
-              breakOne(e);
-            }
             // counterattack: a straight (non-diagonal) hit on a shielded side that leaves it standing
             if (!done && e.alive && !weak && !diag && e.atk > 0 && !e.tangled && moved && has(run, "aegis")) relicFx("aegis");
             if (!done && e.alive && !weak && !diag && e.atk > 0 && !e.tangled && !(moved && has(run, "aegis"))) counter(e, rec);
@@ -1051,6 +1053,7 @@
     return rpick(rng, commons);
   }
   function genObjectives(run, B) {
+    if (BAL.simple) return [];
     const rng = run.rng;
     const teleCount = B.enemies.filter((e) => D.ENEMIES[e.type].tele).length;
     const pool = shuffle(rng, Object.keys(D.OBJECTIVES)).filter((id) => !(id === "friendly" && teleCount < 2) && !(id === "multi" && B.enemies.length < 3) && !(id === "fast2" && B.isBoss));
@@ -1095,6 +1098,7 @@
 
   /* ---------- rewards ---------- */
   function genRewards(run, kind) {
+    if (BAL.simple) return [];
     const rng = run.rng;
     const out = [];
     const compPool = shuffle(rng, Object.keys(D.COMPANIONS).filter((id) => !run.companions.includes(id)));

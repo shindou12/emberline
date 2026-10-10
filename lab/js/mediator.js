@@ -119,6 +119,7 @@
     floorText() {
       if (!this.run.nodeId) return "入口";
       const n = this.run.map.nodes[this.run.nodeId];
+      if (D.BAL.simple) return n.type === "rest" ? "焚き火" : n.final ? "最終戦" : `第${n.row + 1}戦`;
       return n.type === "boss" ? "最深部" : `第${n.row + 1}層`;
     }
     loadRecord() { try { return JSON.parse(localStorage.getItem("emberline.record") || "{}"); } catch (_) { return {}; } }
@@ -835,7 +836,7 @@
       this.layoutStacks();
       const c = tc(ev.x, ev.y);
       v.fx.ring(c.x, c.y, 34, "#b08cff", 360, 4);
-      v.floats.spawn(ev.reason === "back" ? "崩れ！" : "もつれ！", c.x, c.y - 44, { kind: "jp", color: "#e9dcff", life: 900, vy: -30 });
+      v.floats.spawn("もつれ！", c.x, c.y - 44, { kind: "jp", color: "#e9dcff", life: 900, vy: -30 });
 
       S.play("chime");
       await EL.wait(160);
@@ -1029,14 +1030,6 @@
       const k = this.relicFloats.push(now) - 1;
       v.floats.spawn(r.name, Math.min(300, 6 + i * 23 + 40), 96 + k * 18, { kind: "jp", size: 12, color: C.gold, life: 1100, vy: -8, screen: true });
       S.play("hover");
-      await EL.wait(60);
-    }
-    /* breakMode: breaking an enemy gives the route a little momentum */
-    async ev_break(ev) {
-      const v = this.v, w = this.enemyViews[ev.uid];
-      v.moveHUD.moves = ev.moves;
-      if (w) { const r = w.rect(); v.floats.spawn("+" + ev.refund + " MOVE", r.x + r.s / 2, r.y - 4, { s: 2, color: C.move, life: 800, vy: -30 }); }
-      S.play("refund", 2);
       await EL.wait(60);
     }
     async ev_relic(ev) {
@@ -1376,7 +1369,9 @@
         v.mapView.sub = arg && arg.first ? "光る場所をタップして進む" : "";
         v.mapView.marker = { x: cur.x, y: cur.y + 8 };
         const rowNext = open.length ? run.map.nodes[open[0]].row : 0;
-        v.mapView.floorText = rowNext >= D.BAL.maxRows ? "最深部 — 灰冠の王が待つ" : `第${rowNext + 1}層 / ${D.BAL.maxRows}層`;
+        const nb = D.BAL.simpleRows, nx = open.length ? run.map.nodes[open[0]] : null;
+        v.mapView.floorText = D.BAL.simple ? (!nx ? "" : nx.type === "rest" ? "焚き火 — ひと息つける" : nx.final ? `最終戦 — 強敵の群れ（${nb}/${nb}）` : `第${nx.row + 1}戦 / ${nb}戦`)
+          : rowNext >= D.BAL.maxRows ? "最深部 — 灰冠の王が待つ" : `第${rowNext + 1}層 / ${D.BAL.maxRows}層`;
         this.hint(arg && arg.first ? "光る場所をタップして進む" : "次の行き先を選ぼう");
       },
       on(evt) {
@@ -1620,8 +1615,9 @@
         S.play("victory"); S.voice(run.heroId, "cheer");
         for (let i = 0; i < 3; i++) setTimeout(() => v.hudFx.burst(U.rand(60, 300), U.rand(200, 360), 24, { speed: [40, 200], life: [500, 1100], palette: [C.ember, C.emberL, C.cream, C.gold], sizes: [2, 4], ay: 120, glow: true }), i * 180);
         run.stats.battles++;
+        const last = B.isBoss || B.final;
         if (!B.isBoss && B.turn === 1) await this.oneStroke();
-        else await this.banner(B.isBoss ? "CONQUERED" : "VICTORY", B.isBoss ? "灰冠の王を討ち果たした" : `撃破！ ${B.turn}ターンで制圧`, C.gold, 900);
+        else await this.banner(last ? "CONQUERED" : "VICTORY", B.isBoss ? "灰冠の王を討ち果たした" : B.final ? "最後の群れを退けた" : `撃破！ ${B.turn}ターンで制圧`, C.gold, 900);
         if (this.labCur) { this.labDone("win"); return; }
         if (!B.isBoss) {
           const got = L.claimObjectives(run, B);
@@ -1636,7 +1632,9 @@
           if (healed) { v.floats.spawn("+" + healed, v.hero.x, v.hero.y - 50, { s: 3, color: C.heal }); v.playerHUD.hp = run.hp; S.play("heal"); await EL.wait(500); }
         }
         this.busy = false;
-        if (B.isBoss) { this.wipe(async () => this.go("RunClear")); return; }
+        if (last) { this.wipe(async () => this.go("RunClear")); return; }
+        // the stripped-down run has no spoils: straight on to the next battle
+        if (D.BAL.simple) { this.wipe(async () => this.go("Map")); return; }
         const kind = B.kind === "elite" ? "elite" : "battle";
         const firstComp = !run.companions.length, slot = run.companions.length < D.BAL.maxCompanions;
         const sub = kind === "elite" ? (slot ? "新たな仲間か、稀少なレリックを" : "稀少なレリックが眠っている") : firstComp ? "最初の仲間を選ぼう" : "レリックをひとつ";
