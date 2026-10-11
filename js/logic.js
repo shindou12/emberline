@@ -370,6 +370,7 @@
   function guardsTile(enemies, e, t) {
     if (!e.alive || e.tangled) return false;
     if (role(e) && role(e) !== "react") return false;
+    if (D.ENEMIES[e.type].arrow) return false; // an archer reacts with its arrow line instead
     const inX = t.x >= e.x && t.x < e.x + e.size, inY = t.y >= e.y && t.y < e.y + e.size;
     let side = null;
     if (inY && t.x === e.x - 1) side = "L";

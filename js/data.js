@@ -91,7 +91,7 @@
   const ENEMIES = {
     husk: { role: "attack", name: "殻喰い", sprite: "husk", hp: 9, atk: 1, pressure: 1, ai: "chase", desc: "近づいてくる。背中（弱点）を向けて歩く。" },
     wisp: { role: "attack", name: "鬼火", sprite: "wisp", hp: 6, atk: 0, pressure: 2, rotates: true, ai: "static", desc: "脆いが夜の圧が強い。弱点が毎ターン回る。" },
-    shield: { role: "react", name: "盾持ち", sprite: "shield", hp: 13, atk: 2, pressure: 1, ai: "static", desc: "硬く、反撃が痛い。背後を狙え。" },
+    shield: { role: "react", name: "盾持ち", sprite: "shield", hp: 13, atk: 2, pressure: 1, ai: "static", desc: "硬い。周りのマスを警戒していて、踏み込むと1ダメージ（1ルート1回）。背後を狙え。" },
     caller: { role: "special", name: "呼び声", sprite: "caller", hp: 8, atk: 1, pressure: 1, summons: true, ai: "flee", desc: "逃げ回りながら殻喰いを呼ぶ。" },
     totem: { role: "special", name: "結界柱", sprite: "totem", hp: 10, atk: 0, pressure: 1, seals: true, ai: "static", desc: "周囲2マスの敵の弱点を封じる。倒すか、範囲の外へ押し出せば弱点が戻る。" },
     brute: { role: "special", name: "骨砕き", sprite: "brute", hp: 16, atk: 3, pressure: 2, ai: "slow", tele: "cross", teleDmg: 9, desc: "2ターンに1歩。十字に大槌を振り下ろす。" },
