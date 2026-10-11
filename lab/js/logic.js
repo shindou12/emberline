@@ -238,6 +238,7 @@
         B.enemies.push(e);
       }
       placeStart(B);
+      setupMagma(B, rng);
       B.objectives = genObjectives(run, B);
       planTelegraphs(B);
       return B;
@@ -284,6 +285,12 @@
       if (node.final) list = rpick(rng, ENC.elite).concat(["knight", "shield"]);
       // the one-road run: 4 enemies in battles 1-4, 5 in battles 5-9 (strong enemies only in the last one)
       else if (BAL.simple) list = row <= 3 ? rpick(rng, row <= 1 ? ENC.t0 : ENC.t1).slice(0, 4) : rpick(rng, row <= 5 ? ENC.t1 : ENC.t2).slice(0, 5);
+      if (BAL.simple && BAL.magmaFoe && (node.final || row % 2 === 1)) list[list.length - 1] = "spewer";
+      // BAL.attackersMin: swap in husks until that many attackers stand on the board (the spewer stays)
+      if (BAL.roles && BAL.attackersMin) {
+        let n = list.filter((t) => D.ENEMIES[t].role === "attack").length;
+        for (let i = 0; i < list.length && n < BAL.attackersMin; i++) if (D.ENEMIES[list[i]].role !== "attack" && list[i] !== "spewer") { list[i] = "husk"; n++; }
+      }
       else if (node.type === "elite") { list = rpick(rng, ENC.elite).slice(); if (row >= 5) list.push("husk"); }
       else if (row === 0) list = rpick(rng, ENC.t0).slice();
       else if (row <= 2) list = rpick(rng, ENC.t1).slice();
@@ -304,6 +311,7 @@
       else placeStart(B);
       if (!floorFails(B, run).length) break;
     }
+    setupMagma(B, rng);
     B.objectives = genObjectives(run, B);
     planTelegraphs(B);
     return B;
@@ -333,10 +341,83 @@
   // fragile enemies are open on two opposite flanks
   const weakSides = (e) => (D.ENEMIES[e.type] && D.ENEMIES[e.type].twoWeak ? [e.weak, OPP[e.weak]] : [e.weak]);
   const entrySide = (a, b) => CW.find((w) => CARD[w][0] === a.x - b.x && CARD[w][1] === a.y - b.y);
+  /* lava (spewers): B.magma = [{x, y, uid}], B.magmaNext = [{x, y, uid, in}] — a spewer's lava cools when it dies */
+  const ownerAlive = (enemies, uid) => enemies.some((e) => e.uid === uid && e.alive);
+  const magmaAt = (B, enemies, x, y) => (B.magma || []).find((m) => m.x === x && m.y === y && ownerAlive(enemies, m.uid));
+  /* lava burns a share of max HP (at least 1) */
+  const magmaDmg = (run) => Math.max(1, Math.round(run.maxHp * BAL.magmaPct));
+  function pickMagma(B, rng, uid, n, avoid) {
+    const busy = (x, y) => isRock(B, x, y) || enemyAt(B.enemies, x, y) || (B.hero.x === x && B.hero.y === y)
+      || (B.magma || []).some((m) => m.x === x && m.y === y) || (B.magmaNext || []).some((m) => m.x === x && m.y === y)
+      || (avoid || []).some((s) => Math.max(Math.abs(s.x - x), Math.abs(s.y - y)) <= 1);
+    const free = [];
+    for (let y = 0; y < B.h; y++) for (let x = 0; x < B.w; x++) if (!busy(x, y)) free.push({ x, y });
+    return shuffle(rng, free).slice(0, n).map((t) => ({ x: t.x, y: t.y, uid }));
+  }
+  function setupMagma(B, rng) {
+    B.magma = []; B.magmaNext = [];
+    for (const e of B.enemies) if (D.ENEMIES[e.type].magma) {
+      B.magma.push(...pickMagma(B, rng, e.uid, BAL.magmaN, B.starts));
+      B.magmaNext.push(...pickMagma(B, rng, e.uid, BAL.magmaN, B.starts).map((m) => Object.assign(m, { in: BAL.magmaEvery })));
+    }
+  }
+  /* BAL.roles: what an enemy does — attack (hits at night), react (guard zone, never counters), special (its own effect) */
+  const role = (e) => (BAL.roles ? D.ENEMIES[e.type].role || "attack" : null);
+  /* BAL.guardZone: the tiles straight next to an enemy, except on its weak sides (a sealed enemy guards all four) */
+  function guardsTile(enemies, e, t) {
+    if (!e.alive || e.tangled) return false;
+    if (role(e) && role(e) !== "react") return false;
+    const inX = t.x >= e.x && t.x < e.x + e.size, inY = t.y >= e.y && t.y < e.y + e.size;
+    let side = null;
+    if (inY && t.x === e.x - 1) side = "L";
+    else if (inY && t.x === e.x + e.size) side = "R";
+    else if (inX && t.y === e.y - 1) side = "U";
+    else if (inX && t.y === e.y + e.size) side = "D";
+    if (side) return sealedBy(enemies, e) || !weakSides(e).includes(side);
+    // BAL.guardDiag: the corners too, unless they sit on a weak side (the weak side stays wholly open)
+    if (!BAL.guardDiag) return false;
+    const h = t.x === e.x - 1 ? "L" : t.x === e.x + e.size ? "R" : null, v = t.y === e.y - 1 ? "U" : t.y === e.y + e.size ? "D" : null;
+    if (!h || !v) return false;
+    if (sealedBy(enemies, e)) return true;
+    const ws = weakSides(e);
+    return !ws.includes(h) && !ws.includes(v);
+  }
+  function guardTiles(B, enemies) {
+    const out = [];
+    for (const e of enemies) for (const [w, [dx, dy]] of Object.entries(CARD)) for (let k = 0; k < e.size; k++) {
+      const x = dx === 0 ? e.x + k : dx > 0 ? e.x + e.size : e.x - 1, y = dy === 0 ? e.y + k : dy > 0 ? e.y + e.size : e.y - 1;
+      if (inB(B, x, y) && !isRock(B, x, y) && !enemyAt(enemies, x, y) && guardsTile(enemies, e, { x, y })) out.push({ x, y, side: w });
+    }
+    if (BAL.guardDiag) for (const e of enemies) for (const [x, y, w] of [[e.x - 1, e.y - 1, "U"], [e.x + e.size, e.y - 1, "U"], [e.x - 1, e.y + e.size, "D"], [e.x + e.size, e.y + e.size, "D"]]) {
+      if (inB(B, x, y) && !isRock(B, x, y) && !enemyAt(enemies, x, y) && guardsTile(enemies, e, { x, y }) && !out.some((t) => t.x === x && t.y === y)) out.push({ x, y, side: w });
+    }
+    return out;
+  }
+  /* BAL.nightLos: at night an enemy only presses on a hero it can see along a row or column
+     (1 = all four ways, 2 = its front only); rocks and other enemies block the line, a tangled enemy is stunned */
+  function seesHero(B, enemies, e, hero) {
+    if (!e.alive || e.tangled) return false;
+    const dirs = BAL.nightLos === 2 ? [CARD[OPP[e.weak]]] : Object.values(CARD);
+    for (const [dx, dy] of dirs) for (let k = 0; k < e.size; k++) {
+      let x = dx === 0 ? e.x + k : dx > 0 ? e.x + e.size : e.x - 1, y = dy === 0 ? e.y + k : dy > 0 ? e.y + e.size : e.y - 1;
+      while (inB(B, x, y) && !isRock(B, x, y)) {
+        if (x === hero.x && y === hero.y) return true;
+        if (enemiesAt(enemies, x, y).length) break;
+        x += dx; y += dy;
+      }
+    }
+    return false;
+  }
   function isWeakEntry(e, a, b) {
     const dx = b.x - a.x, dy = b.y - a.y;
-    if (Math.abs(dx) + Math.abs(dy) !== 1) return false;
     if (covers(e, a.x, a.y)) return false;
+    // BAL.cornerWeak: the two corners at either end of a weak side count as that side
+    if (Math.abs(dx) === 1 && Math.abs(dy) === 1) {
+      if (!BAL.cornerWeak) return false;
+      const ws = weakSides(e);
+      return ws.includes(dx > 0 ? "L" : "R") || ws.includes(dy > 0 ? "U" : "D");
+    }
+    if (Math.abs(dx) + Math.abs(dy) !== 1) return false;
     return weakSides(e).includes(entrySide(a, b));
   }
   /* an archer's front line: up to range tiles straight out of its face (opposite its weak side) */
@@ -491,7 +572,7 @@
       forcedWeak: 0, uses: {}, marks: {}, dirs: [], straight: 0, route: [route[0]],
       compassUsed: false, plumeUsed: run.plumeUsed, bumps: 0, tangles: 0, multi: 0, bombs: [], bombLog: [],
       cold: new Set(), coldAt: [false], hitCount: {}, touched: new Set(),
-      delayed: new Set(), shot: new Set(), relicShown: new Set(),
+      delayed: new Set(), shot: new Set(), zoned: new Set(), relicShown: new Set(),
     };
     // a relic that just did something (once per route each, for the HUD)
     const relicFx = (id) => { if (!has(run, id) || T.relicShown.has(id)) return; T.relicShown.add(id); push({ type: "relicFx", id }); };
@@ -549,7 +630,7 @@
 
     function counter(e, rec) {
       if (T.guardBlock > 0) { T.guardBlock--; if (run.heroId !== "gorm" || T.guardBlock === 0) relicFx("shade"); push({ type: "guardBlocked", uid: e.uid, reason: "guard" }); rec.guards.push({ uid: e.uid, blocked: true }); return; }
-      const dmg = Math.max(0, e.atk - (has(run, "gauntlet") ? 1 : 0));
+      const dmg = Math.max(0, Math.round(e.atk * BAL.counterMul) - (has(run, "gauntlet") ? 1 : 0));
       if (has(run, "gauntlet") && e.atk > 0) relicFx("gauntlet");
       if (!dmg) return;
       T.guardHits++;
@@ -716,6 +797,16 @@
         T.shot.add(ar.uid);
         heroHurt(D.ENEMIES[ar.type].arrow.dmg, ar, "arrow", rec);
       }
+      // lava: every step into it burns (its spewer dead = cooled, even mid-route)
+      if (!done) { const m = magmaAt(B, st.enemies, b.x, b.y); if (m) heroHurt(magmaDmg(run), st.enemies.find((e) => e.uid === m.uid), "magma", rec); }
+      if (done) break;
+      // guard zones: stepping next to an enemy's guarded side costs BAL.guardDmg (once per enemy per route)
+      if (BAL.guardZone && !done) for (const ge of alive()) {
+        if (T.zoned.has(ge.uid) || covers(ge, b.x, b.y) || !guardsTile(st.enemies, ge, b)) continue;
+        T.zoned.add(ge.uid);
+        heroHurt(BAL.guardDmg, ge, "zone", rec);
+        if (done) break;
+      }
       if (done) break;
       // passing through enemies
       const hereE = enemiesAt(st.enemies, b.x, b.y).filter((e) => !covers(e, a.x, a.y));
@@ -775,8 +866,10 @@
             damage(e, dmg, "hero", rec, { weak, forced, sealed, armored, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
             const moved = !done && e.alive ? shove(e, d, rec) : false;
             // counterattack: a straight (non-diagonal) hit on a shielded side that leaves it standing
-            if (!done && e.alive && !weak && !diag && e.atk > 0 && !e.tangled && moved && has(run, "aegis")) relicFx("aegis");
-            if (!done && e.alive && !weak && !diag && e.atk > 0 && !e.tangled && !(moved && has(run, "aegis"))) counter(e, rec);
+            // BAL.diagCounter: a diagonal hit is countered too (it is no longer a free way round)
+            const guarded = (!diag || BAL.diagCounter) && role(e) !== "react";
+            if (!done && e.alive && !weak && guarded && e.atk > 0 && !e.tangled && moved && has(run, "aegis")) relicFx("aegis");
+            if (!done && e.alive && !weak && guarded && e.atk > 0 && !e.tangled && !(moved && has(run, "aegis"))) counter(e, rec);
             if (done) break;
           }
         }
@@ -902,12 +995,29 @@
     }
     B.enemies = alive();
     if (!B.enemies.length) { push({ type: "victory" }); return events; }
+    // 2b. lava: dead spewers' lava cools, announced lava lands, each spewer announces its next
+    if (B.magma) {
+      const live = (m) => ownerAlive(B.enemies, m.uid);
+      B.magma = B.magma.filter(live); B.magmaNext = B.magmaNext.filter(live);
+      const landed = [];
+      for (const m of B.magmaNext) if (--m.in <= 0) landed.push(m);
+      if (landed.length) {
+        B.magmaNext = B.magmaNext.filter((m) => m.in > 0);
+        for (const m of landed) if (!B.magma.some((o) => o.x === m.x && o.y === m.y)) B.magma.push({ x: m.x, y: m.y, uid: m.uid });
+        push({ type: "magma", tiles: landed.map((m) => ({ x: m.x, y: m.y })) });
+      }
+      for (const e of alive()) if (D.ENEMIES[e.type].magma && !B.magmaNext.some((m) => m.uid === e.uid))
+        B.magmaNext.push(...pickMagma(B, rng, e.uid, BAL.magmaN).map((m) => Object.assign(m, { in: BAL.magmaEvery })));
+    }
     // 3. old embers cool down
     const nCool = coolCount(run, B.trail.length);
     if (nCool > 0) push({ type: "cool", tiles: B.trail.splice(0, nCool) });
     // 4. the night presses in (anti-turtling): each surviving enemy
     let total = 0;
     for (const e of alive()) {
+      if (!BAL.nightPressure) break;
+      if (role(e) && role(e) !== "attack") continue;
+      if (BAL.nightLos && !seesHero(B, B.enemies, e, B.hero)) continue;
       const p = enemyPressure(run, B, e);
       if (p > 0) { push({ type: "pressure", uid: e.uid, dmg: p }); total += p; }
     }
@@ -1161,6 +1271,12 @@
         const ty = dy === 0 ? e.y + k : dy > 0 ? e.y + e.size : e.y - 1;
         if (!isRock(B, tx, ty)) out.push({ x: tx, y: ty });
       }
+      // the corners at both ends of the side
+      if (BAL.cornerWeak) for (const k of [-1, e.size]) {
+        const tx = dx === 0 ? e.x + k : dx > 0 ? e.x + e.size : e.x - 1;
+        const ty = dy === 0 ? e.y + k : dy > 0 ? e.y + e.size : e.y - 1;
+        if (inB(B, tx, ty) && !isRock(B, tx, ty) && !out.some((t) => t.x === tx && t.y === ty)) out.push({ x: tx, y: ty });
+      }
     }
     return out;
   }
@@ -1179,6 +1295,7 @@
   }
   function enemyPressure(run, B, e) {
     let p = e.pressure - (has(run, "coal") ? 1 : 0);
+    if (BAL.roles && BAL.attackBonus && D.ENEMIES[e.type].role === "attack") p += BAL.attackBonus;
     if (e.boss && B.phase2) p += 1;
     p += e.grow || 0;
     return Math.max(0, p);
@@ -1190,9 +1307,10 @@
     for (const e of enemies) if (e.alive && !e.tangled && e.cdMax && e.cd <= 1 && D.ENEMIES[e.type].act === "snipe") dmg += snipeDmg(run);
     return dmg;
   }
-  function pressureOf(run, B, enemies) {
+  function pressureOf(run, B, enemies, hero) {
     let total = 0;
-    for (const e of enemies) if (e.alive) total += enemyPressure(run, B, e);
+    if (!BAL.nightPressure) return 0;
+    for (const e of enemies) if (e.alive && (!role(e) || role(e) === "attack") && (!BAL.nightLos || !hero || seesHero(B, enemies, e, hero))) total += enemyPressure(run, B, e);
     return total;
   }
 
@@ -1281,7 +1399,7 @@
     blockedSet, stepError, isWeakEntry, sealedBy, enemyAt, enemiesAt, covers, isRock, idx, inB,
     simulate, commitRoute, enemyPhase, genRewards, applyReward, heal, battleHeal, reachable, weakEntries,
     specOf: (B) => ({ loc: B.loc, rocks: B.tiles.map((v, i) => (v ? [i % B.w, Math.floor(i / B.w)] : null)).filter(Boolean), enemies: B.enemies.map((e) => ({ type: e.type, x: e.x, y: e.y, weak: e.weak, cd: e.cd })) }),
-    boardMetrics, firstKills, floorFails, condReq, condProgress, pressureOf, cdThreat, arrowTiles, weakSides, OPP, enemyPressure, has, coolCount, canMove, unstick,
+    boardMetrics, firstKills, role, guardTiles, seesHero, magmaAt, floorFails, condReq, condProgress, pressureOf, cdThreat, arrowTiles, weakSides, OPP, enemyPressure, has, coolCount, canMove, unstick,
     teleTiles, teleDmgAt, planTelegraphs, pushDist,
     objectiveState, claimObjectives,
   };

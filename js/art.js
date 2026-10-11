@@ -482,6 +482,7 @@
   S.drummer = recolor(S.husk, { p: "o", P: "O", q: "W", c: "y" });
   S.herald = recolor(S.shield, { P: "Y", q: "W", m: "y", M: "o", c: "6" });
   S.bomber = recolor(S.wisp, { c: "y", b: "o", 6: "r" });
+  S.spewer = recolor(S.husk, { p: "r", P: "R", q: "o", c: "y" });
   for (const k in S) build(k, S[k]);
   for (const k in I) build("i_" + k, I[k]);
   for (const k in N) build("n_" + k, N[k]);

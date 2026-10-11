@@ -36,7 +36,7 @@ function score(res, B, run, prof) {
   // a less practiced player reads the preview (kills, damage, HP) but does not plan the enemy turn
   if (prof.naive) return T.kills * 30 + dmg * 3 - (run.hp - T.hp) * 4 + T.moves * 0.2;
   const alive = res.st.enemies.filter((e) => e.alive);
-  const pressure = L.pressureOf(run, B, alive);
+  const pressure = L.pressureOf(run, B, alive, res.end);
   // positional sense: stay close to a weak-side entry, keep room to move
   const end = res.end;
   let near = 99;

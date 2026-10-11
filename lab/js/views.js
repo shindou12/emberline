@@ -122,7 +122,7 @@
       this.tiles = new Array(GW * GH).fill(0);
       this.dim = 0; this.reach = null; this.entries = []; this.entryEmph = 0; this.t = 0; this.cursor = null; this.heroTile = null; this.heroHint = 0;
       this.loc = "temple";
-      this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.seals = []; this.starts = []; this.startSprite = null; this.arrows = [];
+      this.teles = []; this.guardEmph = 0; this.heroEnd = null; this.seals = []; this.starts = []; this.startSprite = null; this.arrows = []; this.zones = []; this.magma = []; this.magmaNext = [];
     }
     /* raw pointer → route input event (geometry only; legality decided elsewhere) */
     routeInput(phase, p) {
@@ -181,7 +181,9 @@
         }
       }
       this.drawSeals(ctx);
+      this.drawMagma(ctx);
       this.drawArrows(ctx);
+      this.drawZones(ctx);
       this.drawTeles(ctx);
       // weak-side approach pads: "charge in from here"
       if (this.entries.length) {
@@ -280,6 +282,37 @@
     }
   };
   /* archers' front lines: green dashes with a travelling arrowhead */
+  /* lava tiles, and the ones announced to land (with the turns left) */
+  BoardView.prototype.drawMagma = function (ctx) {
+    const fl = 0.5 + 0.5 * Math.sin(this.t / 260);
+    for (const m of this.magma) {
+      const px = m.x * T, py = m.y * T;
+      ctx.globalAlpha = 0.85; ctx.fillStyle = "#7a1a0c"; ctx.fillRect(px + 1, py + 1, T - 2, T - 2);
+      ctx.fillStyle = "#e0441c"; ctx.fillRect(px + 4, py + 4, T - 8, T - 8);
+      ctx.globalAlpha = 0.6 + 0.4 * fl; ctx.fillStyle = "#ffb020";
+      for (let i = 0; i < 4; i++) { const h = hash(m.x * 7 + i, m.y * 5 + i); ctx.fillRect(px + 6 + (h % (T - 16)), py + 6 + ((h >> 5) % (T - 16)), 4, 3); }
+      ctx.globalAlpha = 1;
+    }
+    for (const m of this.magmaNext) {
+      const px = m.x * T, py = m.y * T;
+      ctx.globalAlpha = 0.18 + 0.12 * fl; ctx.fillStyle = "#ff6a2a"; ctx.fillRect(px + 2, py + 2, T - 4, T - 4);
+      ctx.globalAlpha = 0.9; ctx.fillStyle = "#ffb020";
+      for (let i = 0; i < T - 4; i += 8) { ctx.fillRect(px + 2 + i, py + 2, 4, 2); ctx.fillRect(px + 2 + i, py + T - 4, 4, 2); ctx.fillRect(px + 2, py + 2 + i, 2, 4); ctx.fillRect(px + T - 4, py + 2 + i, 2, 4); }
+      A.text(ctx, String(m.in), px + T / 2, py + T / 2 - 6, { s: 2, align: "center", color: "#ffd35a" });
+      ctx.globalAlpha = 1;
+    }
+  };
+  /* guard zones (experiment): a red dashed frame on each guarded tile, a tick toward the enemy */
+  BoardView.prototype.drawZones = function (ctx) {
+    for (const z of this.zones) {
+      const px = z.x * T, py = z.y * T, v = DIRV[z.side];
+      ctx.globalAlpha = 0.16; ctx.fillStyle = "#ff4d5e"; ctx.fillRect(px + 2, py + 2, T - 4, T - 4);
+      ctx.globalAlpha = 0.85; ctx.fillStyle = "#ff8f9b";
+      for (let i = 0; i < T - 4; i += 8) { ctx.fillRect(px + 2 + i, py + 2, 4, 2); ctx.fillRect(px + 2 + i, py + T - 4, 4, 2); ctx.fillRect(px + 2, py + 2 + i, 2, 4); ctx.fillRect(px + T - 4, py + 2 + i, 2, 4); }
+      ctx.fillRect(px + T / 2 - v[0] * T * 0.36 - 3, py + T / 2 - v[1] * T * 0.36 - 3, 6, 6);
+      ctx.globalAlpha = 1;
+    }
+  };
   BoardView.prototype.drawArrows = function (ctx) {
     const k = (this.t / 500) % 1;
     for (const a of this.arrows) {
@@ -712,7 +745,7 @@
       const d = D.ENEMIES[e.type];
       this.uid = e.uid; this.type = e.type; this.sprite = d.sprite; this.size = e.size || 1;
       this.tx = e.x; this.ty = e.y; this.hp = e.hp; this.maxHp = e.maxHp; this.shownHp = e.hp;
-      this.weak = e.weak; this.sealed = false; this.pressure = e.pressure; this.boss = !!e.boss;
+      this.weak = e.weak; this.sealed = false; this.pressure = e.pressure; this.boss = !!e.boss; this.role = EL.Logic.role(e);
       this.emph = 0; this.target = false; this.kill = false; this.dmg = null; this.dmgWeak = false; this.guardDmg = null; this.blocked = false; this.pushOnly = false;
       this.grow = 0; this.willGrow = false;
       this.tangled = false; this.sox = 0; this.soy = 0; this.push = null;
@@ -783,6 +816,7 @@
       const r = this.rect();
       this.drawHp(ctx, r);
       if (this.cdMax) this.drawCountdown(ctx, r);
+      if (this.role) this.drawRole(ctx, r);
       if (this.bomb) { const k = Math.floor(this.t / 180) % 2; A.spr(ctx, "i_flame", r.x + r.s - 8, r.y + 16 - k, { s: 2, ax: 0.5, ay: 1 }); }
       if (this.target) this.drawTarget(ctx, r);
     }
@@ -850,6 +884,15 @@
         const py = v[1] !== 0 ? y + v[1] * along * 2 : y + i * 2;
         ctx.fillRect(U.snap(px) - th / 2, U.snap(py) - th / 2, th, th);
       }
+    }
+    /* the enemy's kind: sword = hits at night, shield = guards its sides, star = a special effect */
+    drawRole(ctx, r) {
+      const icon = { attack: "i_sword", react: "i_shield", special: "i_star" }[this.role];
+      const col = { attack: "#8f2231", react: "#2b4f7a", special: "#6a4a12" }[this.role];
+      const bx = r.x + r.s - 16, by = r.y - 4;
+      ctx.fillStyle = C.ink; ctx.fillRect(bx - 2, by - 2, 20, 20);
+      ctx.fillStyle = col; ctx.fillRect(bx, by, 16, 16);
+      A.spr(ctx, icon, bx + 8, by + 8, { s: 2, ax: 0.5, ay: 0.5 });
     }
     /* the countdown: a badge that turns red and throbs when the act is one night away */
     drawCountdown(ctx, r) {

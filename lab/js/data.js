@@ -16,6 +16,14 @@
     maxCompanions: 3,
     rushCap: 3, // Rue: most attack gained from running straight
     maxRows: 7, // rows before the boss
+    attackersMin: 0, attackBonus: 0, // tuning: at least this many attackers per battle / extra night damage per attacker
+    startMode: "diag", // the hero opens on one of two spots near the middle, on a diagonal
+    roles: true, // attack (sword): hits at night / react (shield): guard zone, no counter / special (star): its own effect only
+    nightPressure: true, // the night presses on the hero for every enemy left standing
+    guardZone: true, guardDmg: 1, guardDiag: true, // guarded corners too, except on the weak side; // experiment A: stepping next to an enemy's guarded (non-weak) side costs 1, once per enemy per route
+    nightLos: 0, // experiment B: the night only hurts from enemies with a clear row/column line to the hero (1 = four ways, 2 = front only)
+    magmaFoe: true, magmaPct: 0.1, magmaN: 3, magmaEvery: 2, // lava spewers join the one-road run: 3 tiles of lava, the next 3 announced 2 turns ahead
+    diagCounter: true, cornerWeak: true, counterMul: 1, // diagonal hits are countered; a weak side includes its two corners
     simple: true, simpleRows: 10, simpleRests: [3, 6, 8], // campfires after these battles; // stripped-down run: one straight road of battles, the last one a crowd of elites; no relics, companions or side stops
   };
 
@@ -81,20 +89,21 @@
   };
 
   const ENEMIES = {
-    husk: { name: "殻喰い", sprite: "husk", hp: 9, atk: 1, pressure: 1, ai: "chase", desc: "近づいてくる。背中（弱点）を向けて歩く。" },
-    wisp: { name: "鬼火", sprite: "wisp", hp: 6, atk: 0, pressure: 2, rotates: true, ai: "static", desc: "脆いが夜の圧が強い。弱点が毎ターン回る。" },
-    shield: { name: "盾持ち", sprite: "shield", hp: 13, atk: 2, pressure: 1, ai: "static", desc: "硬く、反撃が痛い。背後を狙え。" },
-    caller: { name: "呼び声", sprite: "caller", hp: 8, atk: 1, pressure: 1, summons: true, ai: "flee", desc: "逃げ回りながら殻喰いを呼ぶ。" },
-    totem: { name: "結界柱", sprite: "totem", hp: 10, atk: 0, pressure: 1, seals: true, ai: "static", desc: "周囲2マスの敵の弱点を封じる。倒すか、範囲の外へ押し出せば弱点が戻る。" },
-    brute: { name: "骨砕き", sprite: "brute", hp: 16, atk: 3, pressure: 2, ai: "slow", tele: "cross", teleDmg: 9, desc: "2ターンに1歩。十字に大槌を振り下ろす。" },
-    boss: { name: "灰冠の王ヴォルグ", sprite: "boss", hp: 40, atk: 2, pressure: 4, size: 2, boss: true, ai: "static", tele: "boss", teleDmg: 10, desc: "深層の主。弱点は毎ターン巡り、灰の波で列を薙ぐ。押し出せない。" },
+    husk: { role: "attack", name: "殻喰い", sprite: "husk", hp: 9, atk: 1, pressure: 1, ai: "chase", desc: "近づいてくる。背中（弱点）を向けて歩く。" },
+    wisp: { role: "attack", name: "鬼火", sprite: "wisp", hp: 6, atk: 0, pressure: 2, rotates: true, ai: "static", desc: "脆いが夜の圧が強い。弱点が毎ターン回る。" },
+    shield: { role: "react", name: "盾持ち", sprite: "shield", hp: 13, atk: 2, pressure: 1, ai: "static", desc: "硬く、反撃が痛い。背後を狙え。" },
+    caller: { role: "special", name: "呼び声", sprite: "caller", hp: 8, atk: 1, pressure: 1, summons: true, ai: "flee", desc: "逃げ回りながら殻喰いを呼ぶ。" },
+    totem: { role: "special", name: "結界柱", sprite: "totem", hp: 10, atk: 0, pressure: 1, seals: true, ai: "static", desc: "周囲2マスの敵の弱点を封じる。倒すか、範囲の外へ押し出せば弱点が戻る。" },
+    brute: { role: "special", name: "骨砕き", sprite: "brute", hp: 16, atk: 3, pressure: 2, ai: "slow", tele: "cross", teleDmg: 9, desc: "2ターンに1歩。十字に大槌を振り下ろす。" },
+    boss: { role: "attack", name: "灰冠の王ヴォルグ", sprite: "boss", hp: 40, atk: 2, pressure: 4, size: 2, boss: true, ai: "static", tele: "boss", teleDmg: 10, desc: "深層の主。弱点は毎ターン巡り、灰の波で列を薙ぐ。押し出せない。" },
     /* the troublesome ones: each bends the puzzle a different way */
-    archer: { name: "弓兵", sprite: "archer", hp: 8, atk: 1, pressure: 1, ai: "static", arrow: { range: 3, dmg: 2 }, desc: "正面3マスを射る。その列に踏み込むと2ダメージ（1ルート1回）。背中が弱点。" },
-    knight: { name: "重装兵", sprite: "knight", hp: 14, atk: 2, pressure: 1, ai: "static", armor: true, desc: "正面（弱点の反対側）からの攻撃は半減。回り込め。" },
-    drummer: { name: "鼓手", sprite: "drummer", hp: 6, atk: 0, pressure: 1, ai: "static", twoWeak: true, cd: 3, act: "drum", desc: "カウント0で、他の敵のカウントを全員1進める。脆い（弱点2つ）。" },
-    sniper: { name: "狙撃手", sprite: "sniper", hp: 7, atk: 0, pressure: 1, ai: "static", cd: 3, act: "snipe", desc: "カウント0で、どこにいても主人公を撃つ（最大HPの3割）。斬れば1ターン遅らせられる。" },
-    bomber: { name: "爆ぜ殻", sprite: "bomber", hp: 9, atk: 1, pressure: 1, ai: "chase", bomb: { dmg: 5 }, desc: "倒すとその周囲1マスに爆発の予兆が出て、ルートの終わりに爆発する（5ダメージ、敵も巻き込む）。範囲の外で止まれば安全。" },
-    herald: { name: "旗手", sprite: "herald", hp: 7, atk: 0, pressure: 1, ai: "static", twoWeak: true, cd: 2, act: "rally", desc: "カウント0で、全ての敵が主人公に正面を向ける（弱点が奥へ回る）。脆い（弱点2つ）。" },
+    archer: { role: "react", name: "弓兵", sprite: "archer", hp: 8, atk: 1, pressure: 1, ai: "static", arrow: { range: 3, dmg: 2 }, desc: "正面3マスを射る。その列に踏み込むと2ダメージ（1ルート1回）。背中が弱点。" },
+    knight: { role: "react", name: "重装兵", sprite: "knight", hp: 14, atk: 2, pressure: 1, ai: "static", armor: true, desc: "正面（弱点の反対側）からの攻撃は半減。回り込め。" },
+    drummer: { role: "special", name: "鼓手", sprite: "drummer", hp: 6, atk: 0, pressure: 1, ai: "static", twoWeak: true, cd: 3, act: "drum", desc: "カウント0で、他の敵のカウントを全員1進める。脆い（弱点2つ）。" },
+    sniper: { role: "special", name: "狙撃手", sprite: "sniper", hp: 7, atk: 0, pressure: 1, ai: "static", cd: 3, act: "snipe", desc: "カウント0で、どこにいても主人公を撃つ（最大HPの3割）。斬れば1ターン遅らせられる。" },
+    bomber: { role: "special", name: "爆ぜ殻", sprite: "bomber", hp: 9, atk: 1, pressure: 1, ai: "chase", bomb: { dmg: 5 }, desc: "倒すとその周囲1マスに爆発の予兆が出て、ルートの終わりに爆発する（5ダメージ、敵も巻き込む）。範囲の外で止まれば安全。" },
+    spewer: { role: "special", name: "溶岩吐き", sprite: "spewer", hp: 8, atk: 1, pressure: 1, ai: "static", magma: true, desc: "戦闘の始めに3マスを溶岩にする。その後は次の3マスを予告し、2ターン後に溶岩にする。溶岩に踏み込むたびに最大HPの1割のダメージ。倒すと撒いた溶岩が冷める。" },
+    herald: { role: "special", name: "旗手", sprite: "herald", hp: 7, atk: 0, pressure: 1, ai: "static", twoWeak: true, cd: 2, act: "rally", desc: "カウント0で、全ての敵が主人公に正面を向ける（弱点が奥へ回る）。脆い（弱点2つ）。" },
   };
 
   /* Relics change *how* you draw routes, not just numbers. */

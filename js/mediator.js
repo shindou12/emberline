@@ -251,6 +251,10 @@
       bd.seals = enemies.filter((e) => e.alive && e.type === "totem").map((t) => ({ x: t.x, y: t.y, r: D.BAL.sealRange }));
       bd.arrows = [];
       for (const e of enemies) if (e.alive) for (const t of L.arrowTiles(B, enemies, e)) bd.arrows.push({ x: t.x, y: t.y, dir: L.OPP[e.weak] });
+      const own = (m) => enemies.some((e) => e.alive && e.uid === m.uid);
+      bd.magma = (B.magma || []).filter(own);
+      bd.magmaNext = (B.magmaNext || []).filter(own);
+      bd.zones = D.BAL.guardZone ? L.guardTiles(B, enemies.filter((e) => e.alive)) : [];
       bd.heroEnd = heroEnd || B.hero;
     }
     /* enemies sharing a tile (a tangle) fan out a little so each stays readable */
@@ -336,7 +340,7 @@
       const v = this.v, run = this.run, B = this.B;
       const S0 = L.stats(run);
       v.moveHUD.moves = S0.mov; v.moveHUD.max = S0.mov; v.moveHUD.prev = null;
-      v.pressureHUD.value = L.pressureOf(run, B, B.enemies); v.pressureHUD.prev = null;
+      v.pressureHUD.value = L.pressureOf(run, B, B.enemies, B.hero); v.pressureHUD.prev = null;
       v.pressureHUD.tele = L.teleDmgAt(B, B.enemies, B.hero.x, B.hero.y); v.pressureHUD.telePrev = null;
       v.playerHUD.hp = run.hp; v.playerHUD.maxHp = run.maxHp; v.playerHUD.prev = null;
       v.companionHUD.cards.forEach((c) => {
@@ -445,11 +449,11 @@
       // HUD previews
       v.moveHUD.prev = res.T.moves;
       v.playerHUD.prev = res.T.hp !== run.hp ? res.T.hp : null;
-      v.pressureHUD.prev = L.pressureOf(run, B, res.st.enemies);
+      v.pressureHUD.prev = L.pressureOf(run, B, res.st.enemies, res.end);
       v.pressureHUD.telePrev = res.teleEnd;
       rt.teleEnd = res.teleEnd;
       // what the coming night will take on top of the route: pressure, a warned tile, a sniper at 1
-      let night = L.pressureOf(run, B, res.st.enemies);
+      let night = L.pressureOf(run, B, res.st.enemies, res.end);
       if (run.relics.includes("afterglow")) night -= Math.min(night, Math.max(0, res.T.moves));
       night += res.teleEnd + L.cdThreat(run, res.st.enemies);
       v.playerHUD.nightPrev = res.outcome === "ok" ? night : 0;
@@ -627,6 +631,7 @@
     async playRoute(route) {
       const B = this.B, run = this.run, v = this.v;
       const res = L.simulate(B, run, route);
+      this.execEnd = route[res.last];
       v.route.pts = route.slice(0, res.last + 1); v.route.consumed = 0; v.route.skillMarks = []; v.route.areas = [];
       v.route.pushes = []; v.route.guardHits = []; v.route.teleEnd = 0;
       v.board.teles = [];
@@ -740,7 +745,7 @@
       h.red = 1; EL.tween(h, { red: 0 }, 260);
       h.ox = -6; EL.tween(h, { ox: 0 }, 220, { ease: U.ease.outElastic });
       v.floats.spawn("-" + ev.dmg, h.x, h.y - 50, { s: 3, color: "#ff4d5e", life: 800 });
-      v.floats.spawn({ arrow: "迎撃", blast: "爆発" }[ev.kind] || "反撃", h.x, h.y - 76, { kind: "jp", color: "#ffb0c8", life: 700, vy: -30 });
+      v.floats.spawn({ arrow: "迎撃", blast: "爆発", zone: "警戒", magma: "溶岩" }[ev.kind] || "反撃", h.x, h.y - 76, { kind: "jp", color: "#ffb0c8", life: 700, vy: -30 });
       v.fx.burst(h.x, h.y - 16, 14, { speed: [60, 200], life: [200, 420], palette: ["#ff4d5e", "#ff8f9b", "#8f2231"], size: 2, glow: true });
       v.postfx.flashLight(h.x, h.y - 16, 120, "255,70,90", 0.9, 300);
       v.playerHUD.hp = ev.hp; v.playerHUD.shake = 3; v.playerHUD.flash = 0.6;
@@ -872,7 +877,7 @@
         v.floats.spawn("+" + ev.refund + " MOVE", cx, r.y + r.s + 4, { s: 2, color: C.heal, life: 900, vy: -24 });
         this.flyOrb(cx, r.y + r.s / 2, ev.moves);
       }
-      v.pressureHUD.value = L.pressureOf(this.run, this.B, this.aliveAfterKill(ev.uid));
+      v.pressureHUD.value = L.pressureOf(this.run, this.B, this.aliveAfterKill(ev.uid), this.execEnd);
       if (!scorch) EL.tween(v.combo, { alpha: 0 }, 400, { delay: 1600, clock: "ui" });
       if (evw.type === "totem" || Object.values(this.enemyViews).some((w) => w.sealed)) this.liveSeals();
       await EL.wait(c >= 3 ? 150 : 100);
@@ -1844,7 +1849,7 @@
     this.deadSet = new Set();
     this.refreshEnemyStatics();
     v.playerHUD.hp = run.hp;
-    v.pressureHUD.value = L.pressureOf(run, B, B.enemies);
+    v.pressureHUD.value = L.pressureOf(run, B, B.enemies, B.hero);
     this.path = B.trail.map((t) => ({ x: t.x, y: t.y }));
     this.refreshBoardMarks();
     this.refreshObjectives();
