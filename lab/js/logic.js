@@ -136,6 +136,7 @@
 
   /* ---------- battle generation ---------- */
   const ENC = {
+    intro: [["husk", "husk", "wisp"], ["husk", "wisp", "wisp"]],
     t0: [["husk", "husk", "wisp", "husk"], ["husk", "archer", "husk", "wisp"], ["husk", "husk", "sniper", "wisp"]],
     t1: [["husk", "archer", "sniper", "husk", "wisp"], ["husk", "bomber", "husk", "wisp", "bomber"], ["knight", "husk", "wisp", "drummer", "sniper"], ["husk", "husk", "wisp", "husk", "shield"], ["husk", "wisp", "wisp", "caller", "husk"], ["husk", "shield", "wisp", "husk", "husk"]],
     t2: [["archer", "sniper", "husk", "knight", "wisp"], ["drummer", "sniper", "husk", "archer", "husk"], ["herald", "knight", "husk", "shield", "wisp"], ["bomber", "bomber", "husk", "totem", "wisp"], ["archer", "archer", "sniper", "drummer", "husk"], ["shield", "shield", "wisp", "totem", "husk"], ["husk", "husk", "wisp", "wisp", "caller", "shield"], ["totem", "husk", "shield", "wisp", "husk", "husk"]],
@@ -283,19 +284,22 @@
       let list;
       const row = node.row;
       if (node.final) list = rpick(rng, ENC.elite).concat(["knight", "shield"]);
-      // the one-road run: 4 enemies in battles 1-4, 5 in battles 5-9 (strong enemies only in the last one)
-      else if (BAL.simple) list = row <= 3 ? rpick(rng, row <= 1 ? ENC.t0 : ENC.t1).slice(0, 4) : rpick(rng, row <= 5 ? ENC.t1 : ENC.t2).slice(0, 5);
-      if (BAL.simple && BAL.magmaFoe && (node.final || row % 2 === 1)) list[list.length - 1] = "spewer";
-      // BAL.attackersMin: swap in husks until that many attackers stand on the board (the spewer stays)
-      if (BAL.roles && BAL.attackersMin) {
-        let n = list.filter((t) => D.ENEMIES[t].role === "attack").length;
-        for (let i = 0; i < list.length && n < BAL.attackersMin; i++) if (D.ENEMIES[list[i]].role !== "attack" && list[i] !== "spewer") { list[i] = "husk"; n++; }
-      }
+      // the one-road run: a gentle start (battle 1: three plain foes, battle 2: three, battle 3: four),
+      // then 4 enemies in battle 4 and 5 in battles 5-9 (strong enemies only in the last one)
+      else if (BAL.simple) list = row === 0 ? rpick(rng, ENC.intro).slice() : row <= 2 ? rpick(rng, ENC.t0).slice(0, row === 1 ? 3 : 4)
+        : row === 3 ? rpick(rng, ENC.t1).slice(0, 4) : rpick(rng, row <= 5 ? ENC.t1 : ENC.t2).slice(0, 5);
       else if (node.type === "elite") { list = rpick(rng, ENC.elite).slice(); if (row >= 5) list.push("husk"); }
       else if (row === 0) list = rpick(rng, ENC.t0).slice();
       else if (row <= 2) list = rpick(rng, ENC.t1).slice();
       else if (row <= 4) list = rpick(rng, ENC.t2).slice();
       else list = rpick(rng, ENC.t3).slice();
+      // lava spewers from battle 4 on (4, 6, 8 and the last)
+      if (BAL.simple && BAL.magmaFoe && (node.final || (row % 2 === 1 && row >= 3))) list[list.length - 1] = "spewer";
+      // BAL.attackersMin: swap in husks until that many attackers stand on the board (the spewer stays)
+      if (BAL.roles && BAL.attackersMin) {
+        let n = list.filter((t) => D.ENEMIES[t].role === "attack").length;
+        for (let i = 0; i < list.length && n < BAL.attackersMin; i++) if (D.ENEMIES[list[i]].role !== "attack" && list[i] !== "spewer") { list[i] = "husk"; n++; }
+      }
       if (cursed) list.push("brute");
       const free = [];
       for (let y = 0; y <= (fixed ? B.h - 1 : 5); y++) for (let x = 0; x < B.w; x++) if (!B.tiles[idx(B, x, y)] && !(fixed && nearFixed(x, y, midGap - 1))) free.push([x, y]);
