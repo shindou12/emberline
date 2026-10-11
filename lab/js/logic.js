@@ -301,8 +301,11 @@
       for (let y = 0; y <= (fixed ? B.h - 1 : 5); y++) for (let x = 0; x < B.w; x++) if (!B.tiles[idx(B, x, y)] && !(fixed && nearFixed(x, y, midGap - 1))) free.push([x, y]);
       const order = shuffle(rng, free);
       const spaced = (x, y) => !B.enemies.some((e) => Math.abs(e.x - x) <= 1 && Math.abs(e.y - y) <= 1);
+      // no pockets: an enemy keeps at least 3 of its 4 sides clear of rocks and the board edge
+      const open = (x, y) => CW.filter((w) => !isRock(B, x + CARD[w][0], y + CARD[w][1])).length >= 3;
       for (const type of list) {
-        let spot = order.find(([x, y]) => !enemyAt(B.enemies, x, y) && spaced(x, y));
+        let spot = order.find(([x, y]) => !enemyAt(B.enemies, x, y) && spaced(x, y) && open(x, y));
+        if (!spot) spot = order.find(([x, y]) => !enemyAt(B.enemies, x, y) && spaced(x, y));
         if (!spot) spot = order.find(([x, y]) => !enemyAt(B.enemies, x, y));
         if (!spot) break;
         B.enemies.push(makeEnemy(B, type, spot[0], spot[1], rng));
