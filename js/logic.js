@@ -304,7 +304,8 @@
       const free = [];
       for (let y = 0; y <= (fixed ? B.h - 1 : 5); y++) for (let x = 0; x < B.w; x++) if (!B.tiles[idx(B, x, y)] && !(fixed && nearFixed(x, y, midGap - 1))) free.push([x, y]);
       const order = shuffle(rng, free);
-      const spaced = (x, y) => !B.enemies.some((e) => Math.abs(e.x - x) <= 1 && Math.abs(e.y - y) <= 1);
+      // enemies never stand side by side (diagonal neighbours are fine)
+      const spaced = (x, y) => !B.enemies.some((e) => Math.abs(e.x - x) + Math.abs(e.y - y) <= 1);
       // no pockets: an enemy keeps at least 3 of its 4 sides clear of rocks and the board edge
       const open = (x, y) => CW.filter((w) => !isRock(B, x + CARD[w][0], y + CARD[w][1])).length >= 3;
       for (const type of list) {
