@@ -607,8 +607,8 @@
       e.alive = false;
       T.kills++; T.chain++;
       // the first kill of a route refunds in full, later kills one less
-      // (experiment BAL.breakMode: kills refund nothing, breaking an enemy does)
-      let refund = BAL.breakMode ? 0 : stats(run, T.hp).refund - (T.kills > 1 ? BAL.refundDecay : 0);
+      // (BAL.breakMode: every kill refunds killRefund, and breaking an enemy refunds breakRefund on top)
+      let refund = BAL.breakMode ? BAL.killRefund : stats(run, T.hp).refund - (T.kills > 1 ? BAL.refundDecay : 0);
       let bonusHeal = 0;
       if (has(run, "chain") && T.chain >= 3) { refund += 1; bonusHeal = 1; relicFx("chain"); }
       if (has(run, "rope") && e.tangled) { refund += 1; relicFx("rope"); }

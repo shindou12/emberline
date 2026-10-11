@@ -394,7 +394,7 @@
           this.v.route.bad = { x: nx.x, y: nx.y, t: this.v.route.t };
           this.lastBad = nx; this.lastBadT = EL.Time.ui;
           S.play("invalid");
-          if (err === "moves") this.hint(EL.Data.BAL.breakMode ? "移動力が足りない — 崩すと回復する" : "移動力が足りない — 撃破で回復する");
+          if (err === "moves") this.hint(EL.Data.BAL.breakMode ? "移動力が足りない — 崩すか倒すと回復する" : "移動力が足りない — 撃破で回復する");
           else if (err === "ember") this.hint("燃えている足跡には入れない（斜めの交差はOK）");
         }
       }
@@ -534,7 +534,7 @@
         this.preview = L.simulate(B, this.run, this.route);
       }
       if (added) { S.play("step", this.route.length - 1); this.updatePreview(); }
-      if (!sameTile(this.route[this.route.length - 1], tile)) { S.play("invalid"); this.hint(EL.Data.BAL.breakMode ? "移動力が足りない — 崩すと回復する" : "移動力が足りない — 撃破で回復する"); }
+      if (!sameTile(this.route[this.route.length - 1], tile)) { S.play("invalid"); this.hint(EL.Data.BAL.breakMode ? "移動力が足りない — 崩すか倒すと回復する" : "移動力が足りない — 撃破で回復する"); }
     }
     enemyInfo(e, ms) {
       const B = this.B, info = D.ENEMIES[e.type];
