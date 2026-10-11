@@ -169,6 +169,10 @@
     // experiment: ?start=center / center3 / diag starts hallway battles in the middle of the board
     const sm = location.search.match(/[?&]start=(center3?|diag)\b/);
     if (sm) EL.Data.BAL.startMode = sm[1];
+    // experiment: ?break=1 (refunds come from breaking enemies), ?mov=N adds to every hero's moves
+    if (/[?&]break=1\b/.test(location.search)) EL.Data.BAL.breakMode = true;
+    const mm = location.search.match(/[?&]mov=(\d)\b/);
+    if (mm) for (const h of Object.values(EL.Data.HEROES)) h.mov += +mm[1];
     // the lab site (?lab, or a page that sets EL_LAB) opens on the board picker
     med.go(/[?&]lab\b/.test(location.search) || window.EL_LAB ? "LabMenu" : "Title");
     requestAnimationFrame(frame);

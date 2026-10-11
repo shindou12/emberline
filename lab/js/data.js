@@ -15,9 +15,10 @@
     restHealPct: 0.35,
     maxCompanions: 3,
     rushCap: 3, // Rue: most attack gained from running straight
+    breakMode: true, breakRefund: 1, // refunds come from breaking enemies (a back hit or a collision), not from killing them
     maxRows: 7, // rows before the boss
     attackersMin: 0, attackBonus: 0, // tuning: at least this many attackers per battle / extra night damage per attacker
-    startMode: "diag", // the hero opens on one of two spots near the middle, on a diagonal
+    startMode: "", // "" = pick an opening spot along the bottom; "center" / "center3" / "diag" are experiments
     roles: true, // attack (sword): hits at night / react (shield): guard zone, no counter / special (star): its own effect only
     nightPressure: true, // the night presses on the hero for every enemy left standing
     guardZone: true, guardDmg: 1, guardDiag: true, // guarded corners too, except on the weak side; // experiment A: stepping next to an enemy's guarded (non-weak) side costs 1, once per enemy per route

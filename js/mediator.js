@@ -394,7 +394,7 @@
           this.v.route.bad = { x: nx.x, y: nx.y, t: this.v.route.t };
           this.lastBad = nx; this.lastBadT = EL.Time.ui;
           S.play("invalid");
-          if (err === "moves") this.hint("移動力が足りない — 撃破で回復する");
+          if (err === "moves") this.hint(EL.Data.BAL.breakMode ? "移動力が足りない — 崩すと回復する" : "移動力が足りない — 撃破で回復する");
           else if (err === "ember") this.hint("燃えている足跡には入れない（斜めの交差はOK）");
         }
       }
@@ -496,6 +496,7 @@
       else if (guardDmg > 0) this.hint(`被弾 −${guardDmg}（反撃・迎撃・爆発）`);
       else if (L.cdThreat(run, res.st.enemies) > 0) this.hint(`狙撃手が撃ってくる！ −${L.cdThreat(run, res.st.enemies)} — 斬れば1ターン遅れる`);
       else if (skills) this.hint("仲間の能力が発動する！");
+      else if (EL.Data.BAL.breakMode && res.T.breaks > 0) this.hint(`崩しで移動+${res.T.breaks * EL.Data.BAL.breakRefund} — 崩した敵は弱点ダメージ`);
       else if (kills) this.hint(kills === 1 ? `撃破で移動+${L.stats(run).refund} — まだ伸ばせる` : "2体目以降の撃破は移動+1 — 目標を見極めて");
       else if (this.route.length > 1) this.hint("指を離して、出撃ボタンで実行");
       else this.hint("光る側面からまっすぐ突っ込め");
@@ -533,7 +534,7 @@
         this.preview = L.simulate(B, this.run, this.route);
       }
       if (added) { S.play("step", this.route.length - 1); this.updatePreview(); }
-      if (!sameTile(this.route[this.route.length - 1], tile)) { S.play("invalid"); this.hint("移動力が足りない — 撃破で回復する"); }
+      if (!sameTile(this.route[this.route.length - 1], tile)) { S.play("invalid"); this.hint(EL.Data.BAL.breakMode ? "移動力が足りない — 崩すと回復する" : "移動力が足りない — 撃破で回復する"); }
     }
     enemyInfo(e, ms) {
       const B = this.B, info = D.ENEMIES[e.type];
@@ -841,7 +842,7 @@
       this.layoutStacks();
       const c = tc(ev.x, ev.y);
       v.fx.ring(c.x, c.y, 34, "#b08cff", 360, 4);
-      v.floats.spawn("もつれ！", c.x, c.y - 44, { kind: "jp", color: "#e9dcff", life: 900, vy: -30 });
+      v.floats.spawn(ev.reason === "back" ? "崩れ！" : "もつれ！", c.x, c.y - 44, { kind: "jp", color: "#e9dcff", life: 900, vy: -30 });
 
       S.play("chime");
       await EL.wait(160);
@@ -1035,6 +1036,14 @@
       const k = this.relicFloats.push(now) - 1;
       v.floats.spawn(r.name, Math.min(300, 6 + i * 23 + 40), 96 + k * 18, { kind: "jp", size: 12, color: C.gold, life: 1100, vy: -8, screen: true });
       S.play("hover");
+      await EL.wait(60);
+    }
+    /* breakMode: breaking an enemy gives the route a little momentum */
+    async ev_break(ev) {
+      const v = this.v, w = this.enemyViews[ev.uid];
+      v.moveHUD.moves = ev.moves;
+      if (w) { const r = w.rect(); v.floats.spawn("+" + ev.refund + " MOVE", r.x + r.s / 2, r.y - 4, { s: 2, color: C.move, life: 800, vy: -30 }); }
+      S.play("refund", 2);
       await EL.wait(60);
     }
     async ev_relic(ev) {
