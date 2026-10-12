@@ -608,7 +608,12 @@
       T.kills++; T.chain++;
       // the first kill of a route refunds in full, later kills one less
       // (BAL.breakMode: every kill refunds killRefund, and breaking an enemy refunds breakRefund on top)
-      let refund = BAL.breakMode ? BAL.killRefund : stats(run, T.hp).refund - (T.kills > 1 ? BAL.refundDecay : 0);
+      // BAL.killMode: 0 = every kill +killRefund, 1 = the first kill +2 then one less per kill (2, 1, 0...),
+      // 2 = only a broken enemy's kill refunds (+killRefund)
+      const km = BAL.killMode || 0;
+      // (BAL.halfBreak: a kill counts as breaking it, so an enemy not yet broken this route refunds breakRefund, nothing more)
+      let refund = BAL.breakMode && BAL.halfBreak ? (T.broke.has(e.uid) ? 0 : (T.broke.add(e.uid), T.breaks++, BAL.breakRefund)) : !BAL.breakMode ? stats(run, T.hp).refund - (T.kills > 1 ? BAL.refundDecay : 0)
+        : km === 1 ? Math.max(0, 3 - T.kills) : km === 2 ? (T.broke.has(e.uid) || e.tangled ? BAL.killRefund : 0) : BAL.killRefund;
       let bonusHeal = 0;
       if (has(run, "chain") && T.chain >= 3) { refund += 1; bonusHeal = 1; relicFx("chain"); }
       if (has(run, "rope") && e.tangled) { refund += 1; relicFx("rope"); }
@@ -634,6 +639,11 @@
       if (e.boss && !st.phase2 && e.hp > 0 && e.hp <= e.maxHp / 2) { st.phase2 = true; push({ type: "bossPhase", uid: e.uid }); }
       // a blow that leaves it standing sets its countdown back one turn (once per route)
       if (e.hp > 0 && e.cdMax && !T.delayed.has(e.uid) && e.cd < e.cdMax) { T.delayed.add(e.uid); e.cd++; push({ type: "delay", uid: e.uid, cd: e.cd }); }
+      // BAL.halfBreak: a blow that brings it down to half its HP or less breaks it (once per route)
+      if (BAL.breakMode && BAL.halfBreak && e.hp > 0 && e.hp <= e.maxHp / 2 && !T.broke.has(e.uid)) {
+        if (!e.tangled) { e.tangled = true; T.tangles++; push({ type: "tangle", uid: e.uid, x: e.x, y: e.y, uids: [e.uid], pile: false, reason: "half" }); }
+        breakOne(e);
+      }
       if (e.hp <= 0) kill(e, src, rec);
     }
     function heroHurt(dmg, e, kind, rec) {
@@ -877,7 +887,7 @@
             if (weak) relicFx("dirk");
             T.attacks++;
             let dmg = base, armored = false;
-            if (weak) { if (!BAL.breakMode) dmg = Math.floor(dmg * S.weakMult); T.weakHits++; }
+            if (weak) { if (!BAL.breakMode || BAL.weakMode === 1) dmg = Math.floor(dmg * S.weakMult); T.weakHits++; }
             // heavy armour: a blow into its face is halved
             else if (D.ENEMIES[e.type].armor && !diag && entrySide(a, b) === OPP[e.weak]) { dmg = Math.ceil(dmg / 2); armored = true; }
             dmg += rush;
@@ -885,7 +895,7 @@
             damage(e, dmg, "hero", rec, { weak, forced, sealed, armored, dir: d, diag, bonus, tile: { x: b.x, y: b.y } });
             const moved = !done && e.alive ? shove(e, d, rec) : false;
             // breakMode: a blow from behind breaks the enemy instead of doubling the damage
-            if (BAL.breakMode && weak && !done && e.alive && !e.tangled) {
+            if (BAL.breakMode && BAL.weakMode !== 1 && weak && !done && e.alive && !e.tangled) {
               e.tangled = true; T.tangles++;
               push({ type: "tangle", uid: e.uid, x: e.x, y: e.y, uids: [e.uid], pile: false, reason: "back" });
               breakOne(e);

@@ -15,7 +15,8 @@
     restHealPct: 0.35,
     maxCompanions: 3,
     rushCap: 3, // Rue: most attack gained from running straight
-    breakMode: true, breakRefund: 1, killRefund: 1, // breaking an enemy (a back hit or a collision) refunds 1 move, every kill refunds 1 more
+    breakMode: true, breakRefund: 1, killRefund: 1, killMode: 0, // breaking an enemy (a back hit or a collision) refunds 1 move, every kill refunds 1 more
+    halfBreak: false, weakMode: 0, // experiment: halfBreak = a blow to half HP or a kill also breaks, and refunds come only from breaks; weakMode 1 = back hits double instead of breaking
     maxRows: 7, // rows before the boss
     attackersMin: 0, attackBonus: 0, // tuning: at least this many attackers per battle / extra night damage per attacker
     startMode: "", // "" = pick an opening spot along the bottom; "center" / "center3" / "diag" are experiments

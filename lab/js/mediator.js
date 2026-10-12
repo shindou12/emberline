@@ -842,7 +842,7 @@
       this.layoutStacks();
       const c = tc(ev.x, ev.y);
       v.fx.ring(c.x, c.y, 34, "#b08cff", 360, 4);
-      v.floats.spawn(ev.reason === "back" ? "崩れ！" : "もつれ！", c.x, c.y - 44, { kind: "jp", color: "#e9dcff", life: 900, vy: -30 });
+      v.floats.spawn(ev.reason === "back" || ev.reason === "half" ? "崩れ！" : "もつれ！", c.x, c.y - 44, { kind: "jp", color: "#e9dcff", life: 900, vy: -30 });
 
       S.play("chime");
       await EL.wait(160);

@@ -173,6 +173,9 @@
     if (/[?&]break=1\b/.test(location.search)) EL.Data.BAL.breakMode = true;
     const mm = location.search.match(/[?&]mov=(\d)\b/);
     if (mm) for (const h of Object.values(EL.Data.HEROES)) h.mov += +mm[1];
+    // experiment: ?half=1 (a blow to half HP or a kill breaks; refunds only from breaks), ?weak=2 (back hits double instead of breaking)
+    if (/[?&]half=1\b/.test(location.search)) EL.Data.BAL.halfBreak = true;
+    if (/[?&]weak=2\b/.test(location.search)) EL.Data.BAL.weakMode = 1;
     // the lab site (?lab, or a page that sets EL_LAB) opens on the board picker
     med.go(/[?&]lab\b/.test(location.search) || window.EL_LAB ? "LabMenu" : "Title");
     requestAnimationFrame(frame);
