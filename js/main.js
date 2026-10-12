@@ -176,6 +176,8 @@
     // experiment: ?half=1 (a blow to half HP or a kill breaks; refunds only from breaks), ?weak=2 (back hits double instead of breaking)
     if (/[?&]half=1\b/.test(location.search)) EL.Data.BAL.halfBreak = true;
     if (/[?&]weak=2\b/.test(location.search)) EL.Data.BAL.weakMode = 1;
+    const cm = location.search.match(/[?&]chain=(\d)\b/); // ?chain=N: refunds grow by 1 every N
+    if (cm) EL.Data.BAL.chainStep = +cm[1];
     // the lab site (?lab, or a page that sets EL_LAB) opens on the board picker
     med.go(/[?&]lab\b/.test(location.search) || window.EL_LAB ? "LabMenu" : "Title");
     requestAnimationFrame(frame);

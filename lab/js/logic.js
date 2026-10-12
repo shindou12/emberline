@@ -597,11 +597,18 @@
     };
     // experiment (BAL.breakMode): the moment an enemy is broken (tangled) the route gains a little
     // momentum, once per enemy per route
+    // BAL.chainStep: refunds grow along the route — the n-th one gives base + floor((n - 1) / chainStep)
+    function chained(base) {
+      if (!base) return 0;
+      T.refunds = (T.refunds || 0) + 1;
+      return base + (BAL.chainStep ? Math.floor((T.refunds - 1) / BAL.chainStep) : 0);
+    }
     function breakOne(e) {
       if (!BAL.breakMode || !e.alive || T.broke.has(e.uid)) return;
       T.broke.add(e.uid); T.breaks++;
-      T.moves += BAL.breakRefund;
-      push({ type: "break", uid: e.uid, refund: BAL.breakRefund, moves: T.moves });
+      const refund = chained(BAL.breakRefund);
+      T.moves += refund;
+      push({ type: "break", uid: e.uid, refund, moves: T.moves });
     }
     function kill(e, src, rec) {
       e.alive = false;
@@ -614,6 +621,7 @@
       // (BAL.halfBreak: a kill counts as breaking it, so an enemy not yet broken this route refunds breakRefund, nothing more)
       let refund = BAL.breakMode && BAL.halfBreak ? (T.broke.has(e.uid) ? 0 : (T.broke.add(e.uid), T.breaks++, BAL.breakRefund)) : !BAL.breakMode ? stats(run, T.hp).refund - (T.kills > 1 ? BAL.refundDecay : 0)
         : km === 1 ? Math.max(0, 3 - T.kills) : km === 2 ? (T.broke.has(e.uid) || e.tangled ? BAL.killRefund : 0) : BAL.killRefund;
+      if (BAL.breakMode) refund = chained(refund);
       let bonusHeal = 0;
       if (has(run, "chain") && T.chain >= 3) { refund += 1; bonusHeal = 1; relicFx("chain"); }
       if (has(run, "rope") && e.tangled) { refund += 1; relicFx("rope"); }
